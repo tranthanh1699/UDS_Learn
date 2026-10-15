@@ -1,15 +1,14 @@
 import { HashRouter, Route, Routes } from 'react-router-dom';
-import { vi } from '@/i18n/vi';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { FaultsPage } from '@/pages/FaultsPage';
 import { HomePage } from '@/pages/HomePage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
-import { PlaceholderPage } from '@/pages/PlaceholderPage';
+import { NrcPage } from '@/pages/NrcPage';
+import { ScenariosPage } from '@/pages/ScenariosPage';
 import { ServicePage } from '@/pages/ServicePage';
-
-const pg = vi.pages;
+import { TracePage } from '@/pages/TracePage';
 
 // HashRouter: dist/ chạy được trên mọi web server tĩnh mà không cần cấu hình rewrite.
 export function App() {
@@ -22,9 +21,9 @@ export function App() {
             <Route path="config" element={<ConfigPage />} />
             <Route path="service/:sid" element={<ServicePage />} />
             <Route path="faults" element={<FaultsPage />} />
-            <Route path="trace" element={<PlaceholderPage title={pg.trace.title} subtitle={pg.trace.subtitle} phase={8} />} />
-            <Route path="nrc" element={<PlaceholderPage title={pg.nrc.title} subtitle={pg.nrc.subtitle} phase={8} />} />
-            <Route path="scenarios" element={<PlaceholderPage title={pg.scenarios.title} subtitle={pg.scenarios.subtitle} phase={8} />} />
+            <Route path="trace" element={<TracePage />} />
+            <Route path="nrc" element={<NrcPage />} />
+            <Route path="scenarios" element={<ScenariosPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

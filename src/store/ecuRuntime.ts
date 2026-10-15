@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { buildExchange, type Exchange } from '@/core/trace/exchange';
-import { UdsServer } from '@/core/uds/engine';
+import { initialEcuState, UdsServer } from '@/core/uds/engine';
 import type { Addressing, SessionKind } from '@/core/vehicle/types';
 import { getEffectiveConditions } from './faults';
 import { useTraceStore } from './trace';
@@ -29,6 +29,8 @@ interface EcuRuntimeState {
   tick: () => void;
   setAutoTesterPresent: (on: boolean) => void;
   setSimulateResponsePending: (on: boolean) => void;
+  /** Đưa ECU về trạng thái lúc mới cấp nguồn lần đầu (xóa cả bộ đếm sai key và giá trị DID đã ghi). */
+  resetEcu: () => void;
 }
 
 const snapshot = () => {
@@ -76,6 +78,10 @@ export const useEcuRuntimeStore = create<EcuRuntimeState>((set, get) => ({
 
   setAutoTesterPresent: (autoTesterPresent) => set({ autoTesterPresent }),
   setSimulateResponsePending: (simulateResponsePending) => set({ simulateResponsePending }),
+  resetEcu: () => {
+    server.patchState(initialEcuState());
+    set({ ...snapshot(), lastSeed: null, lastExchange: null, autoTesterPresent: false, simulateResponsePending: false });
+  },
 }));
 
 /** Truy cập engine chỉ để đọc (ví dụ tra metadata service). */

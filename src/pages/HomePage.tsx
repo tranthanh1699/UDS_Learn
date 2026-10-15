@@ -1,10 +1,9 @@
 import { Layers, PlayCircle, Sparkles } from 'lucide-react';
+import { LayerStack } from '@/assets/svg/LayerStack';
 import { vi } from '@/i18n/vi';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { LiveVehicleNetwork } from '@/components/uds/LiveVehicleNetwork';
-
-const layerColors = ['border-l-byte-sid', 'border-l-byte-pci', 'border-l-byte-data'];
 
 export function HomePage() {
   const p = vi.pages.home;
@@ -35,13 +34,15 @@ export function HomePage() {
         </Card>
         <Card className="lg:col-span-2">
           <CardHeader title={p.layersTitle} icon={<Layers className="h-4 w-4" />} />
-          <CardBody className="space-y-2">
-            {p.layers.map((layer, i) => (
-              <div key={layer.name} className={`rounded-md border border-border border-l-4 ${layerColors[i]} bg-surface-2/50 px-3 py-2`}>
-                <div className="text-sm font-semibold">{layer.name}</div>
-                <div className="text-xs text-muted">{layer.desc}</div>
-              </div>
-            ))}
+          <CardBody className="space-y-3">
+            <LayerStack />
+            <ul className="space-y-1 text-xs">
+              {p.layers.map((layer) => (
+                <li key={layer.name}>
+                  <span className="font-semibold">{layer.name}:</span> <span className="text-muted">{layer.desc}</span>
+                </li>
+              ))}
+            </ul>
           </CardBody>
         </Card>
         <div className="lg:col-span-5">

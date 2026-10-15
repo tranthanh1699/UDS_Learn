@@ -7,6 +7,8 @@ interface UiState {
   theme: Theme;
   sidebarCollapsed: boolean;
   mobileNavOpen: boolean;
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
   toggleTheme: () => void;
   toggleSidebar: () => void;
   setMobileNavOpen: (open: boolean) => void;
@@ -22,6 +24,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   theme: initialTheme,
   sidebarCollapsed: loadString('sidebarCollapsed') === '1',
   mobileNavOpen: false,
+  paletteOpen: false,
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   toggleTheme: () => {
     const theme: Theme = get().theme === 'dark' ? 'light' : 'dark';
     applyTheme(theme);

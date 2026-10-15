@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { useEcuClock } from '@/hooks/useEcuClock';
+import { CommandPalette } from './CommandPalette';
 import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
 import { TopBar } from './TopBar';
@@ -20,6 +21,7 @@ export function AppLayout() {
         </div>
       </div>
       <StatusBar />
+      <CommandPalette />
     </div>
   );
 }
