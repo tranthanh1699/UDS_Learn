@@ -8,7 +8,8 @@ const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(mi
 export function readDidData(def: DidDefinition, state: Readonly<EcuState>, conditions: VehicleConditions): number[] {
   switch (def.source) {
     case 'vehicleSpeed':
-      return [clamp(Math.round(conditions.speedKmh), 0, 0xff)];
+      // Tín hiệu không tin cậy (lỗi cảm biến tốc độ bánh) → giá trị thay thế 0xFF
+      return [conditions.speedValid === false ? 0xff : clamp(Math.round(conditions.speedKmh), 0, 0xfe)];
     case 'engineRpm': {
       const rpm = clamp(Math.round(conditions.rpm), 0, 0xffff);
       return [rpm >> 8, rpm & 0xff];

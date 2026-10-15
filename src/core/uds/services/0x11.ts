@@ -29,6 +29,7 @@ export const ecuReset: ServiceDefinition = {
     ctx.pass(t.lengthTitle, t.lengthPass);
 
     if (!config.ecuReset.requireStandstill) ctx.pass(t.speedTitle, t.speedNotRequired);
+    else if (conditions.speedValid === false) return ctx.fail(t.speedTitle, NRC.conditionsNotCorrect, t.speedInvalid);
     else if (conditions.speedKmh > 0) return ctx.fail(t.speedTitle, NRC.vehicleSpeedTooHigh, t.speedFail(conditions.speedKmh));
     else ctx.pass(t.speedTitle, t.speedPass);
 

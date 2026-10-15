@@ -5,8 +5,8 @@ import type { Gear } from '@/core/vehicle/types';
 import { vi } from '@/i18n/vi';
 import { cn } from '@/lib/cn';
 import { formatNumber } from '@/lib/format';
-import { useFaultsStore } from '@/store/faults';
-import { selectConditions, useVehicleConfigStore } from '@/store/vehicleConfig';
+import { useEffectiveConditions, useFaultsStore } from '@/store/faults';
+import { useVehicleConfigStore } from '@/store/vehicleConfig';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Slider } from '@/components/ui/Slider';
 import { Switch } from '@/components/ui/Switch';
@@ -28,7 +28,7 @@ function Row({ label, value, children }: { label: string; value: ReactNode; chil
 
 /** Bảng đồng hồ gắn với điều kiện xe hiện tại và đèn cảnh báo từ trạng thái lỗi. */
 export function LiveDashboard() {
-  const c = useVehicleConfigStore(selectConditions);
+  const c = useEffectiveConditions();
   const milOn = useFaultsStore((s) => s.milOn);
   const absOn = useFaultsStore((s) => s.absLampOn);
   return <Dashboard conditions={c} milOn={milOn} absOn={absOn} />;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { buildExchange, type Exchange } from '@/core/trace/exchange';
 import { UdsServer } from '@/core/uds/engine';
 import type { Addressing, SessionKind } from '@/core/vehicle/types';
+import { getEffectiveConditions } from './faults';
 import { useTraceStore } from './trace';
 import { useVehicleConfigStore } from './vehicleConfig';
 
@@ -48,7 +49,7 @@ export const useEcuRuntimeStore = create<EcuRuntimeState>((set, get) => ({
     const result = server.handleRequest(request, {
       addressing,
       now,
-      conditions: config.conditions,
+      conditions: getEffectiveConditions(),
       simulateResponsePending: get().simulateResponsePending && !opts.auto,
     });
     const trace = useTraceStore.getState();

@@ -7,6 +7,8 @@ export type Addressing = 'physical' | 'functional';
 
 export interface VehicleConditions {
   speedKmh: number;
+  /** false khi tín hiệu tốc độ không tin cậy (ví dụ lỗi cảm biến tốc độ bánh xe). Không có = tin cậy. */
+  speedValid?: boolean;
   rpm: number;
   engineRunning: boolean;
   batteryVoltage: number;
