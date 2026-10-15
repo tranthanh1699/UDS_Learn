@@ -5,7 +5,7 @@ import type { ServiceDefinition } from '../types';
 
 const t = vi.uds.service3E;
 
-/** 0x3E TesterPresent (ISO 14229-1, mục 10.5). Engine tự khởi động lại S3 sau mỗi request. */
+/** 0x3E TesterPresent (ISO 14229-1:2020, mục 10.7). Engine tự khởi động lại S3 sau mỗi request. */
 export const testerPresent: ServiceDefinition = {
   sid: 0x3e,
   name: 'TesterPresent',

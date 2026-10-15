@@ -13,6 +13,9 @@ export interface TransferFrame {
   sn?: number;
   /** Khoảng chờ tối thiểu (µs) trước frame này theo STmin; chỉ có ở Consecutive Frame. */
   minGapUs?: number;
+  /** Vị trí phần payload của frame trong bản tin gốc (không có ở Flow Control). */
+  payloadOffset?: number;
+  payloadLength?: number;
 }
 
 /**
@@ -40,7 +43,15 @@ export function planTransfer(
       }
       cfInBlock++;
     }
-    const frame: TransferFrame = { from: 'sender', kind: s.kind, data: s.data, pciLength: s.pciLength, padStart: s.padStart };
+    const frame: TransferFrame = {
+      from: 'sender',
+      kind: s.kind,
+      data: s.data,
+      pciLength: s.pciLength,
+      padStart: s.padStart,
+      payloadOffset: s.payloadOffset,
+      payloadLength: s.payloadLength,
+    };
     if (s.sn !== undefined) {
       frame.sn = s.sn;
       frame.minGapUs = gapUs;

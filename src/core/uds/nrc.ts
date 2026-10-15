@@ -70,7 +70,7 @@ export function nrcName(code: number): string {
 /** SID của negative response. */
 export const NEGATIVE_RESPONSE_SID = 0x7f;
 
-/** Các NRC ECU không được gửi khi request dùng functional addressing (ISO 14229-1, mục 7.5). */
+/** Các NRC ECU không được gửi khi request dùng functional addressing (quy tắc response chung của ISO 14229-1). */
 export const NRC_SUPPRESSED_ON_FUNCTIONAL: readonly number[] = [
   NRC.serviceNotSupported,
   NRC.subFunctionNotSupported,

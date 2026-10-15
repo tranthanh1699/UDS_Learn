@@ -2,6 +2,7 @@ import { Layers, PlayCircle, Sparkles } from 'lucide-react';
 import { vi } from '@/i18n/vi';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { LiveVehicleNetwork } from '@/components/uds/LiveVehicleNetwork';
 
 const layerColors = ['border-l-byte-sid', 'border-l-byte-pci', 'border-l-byte-data'];
 
@@ -43,6 +44,9 @@ export function HomePage() {
             ))}
           </CardBody>
         </Card>
+        <div className="lg:col-span-5">
+          <LiveVehicleNetwork />
+        </div>
         <Card className="lg:col-span-3">
           <CardHeader title={p.quickStartTitle} icon={<PlayCircle className="h-4 w-4" />} />
           <CardBody>

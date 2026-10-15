@@ -1,18 +1,19 @@
 import { create } from 'zustand';
-import type { VehicleConditions } from '@/core/vehicle/types';
+import type { VehicleConditions, VehicleConfig } from '@/core/vehicle/types';
 import { DEFAULT_VEHICLE } from '@/data/defaultVehicle';
 
 export type { Gear, VehicleConditions } from '@/core/vehicle/types';
 
-/** Điều kiện xe đang mô phỏng. Giai đoạn 5 sẽ bổ sung toàn bộ VehicleConfig và persistence. */
-export const DEFAULT_CONDITIONS: VehicleConditions = DEFAULT_VEHICLE.conditions;
-
+/** Cấu hình xe đang dùng. Giai đoạn 5 sẽ bổ sung chỉnh sửa đầy đủ, persistence và nhập/xuất JSON. */
 interface VehicleConfigState {
-  conditions: VehicleConditions;
+  config: VehicleConfig;
   setConditions: (patch: Partial<VehicleConditions>) => void;
 }
 
 export const useVehicleConfigStore = create<VehicleConfigState>((set) => ({
-  conditions: DEFAULT_CONDITIONS,
-  setConditions: (patch) => set((s) => ({ conditions: { ...s.conditions, ...patch } })),
+  config: structuredClone(DEFAULT_VEHICLE),
+  setConditions: (patch) =>
+    set((s) => ({ config: { ...s.config, conditions: { ...s.config.conditions, ...patch } } })),
 }));
+
+export const selectConditions = (s: VehicleConfigState) => s.config.conditions;

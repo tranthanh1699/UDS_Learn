@@ -6,7 +6,7 @@ import { formatNumber } from '@/lib/format';
 import { useCountdown } from '@/hooks/useCountdown';
 import { useEcuRuntimeStore } from '@/store/ecuRuntime';
 import { useFaultsStore } from '@/store/faults';
-import { useVehicleConfigStore } from '@/store/vehicleConfig';
+import { selectConditions, useVehicleConfigStore } from '@/store/vehicleConfig';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 function Item({ icon, label, children, hint, className }: { icon: ReactNode; label: string; children: ReactNode; hint?: string; className?: string }) {
@@ -27,7 +27,7 @@ export function StatusBar() {
   const session = useEcuRuntimeStore((s) => s.session);
   const unlockedLevel = useEcuRuntimeStore((s) => s.unlockedLevel);
   const s3ExpiresAt = useEcuRuntimeStore((s) => s.s3ExpiresAt);
-  const c = useVehicleConfigStore((s) => s.conditions);
+  const c = useVehicleConfigStore(selectConditions);
   const faultCount = useFaultsStore((s) => s.activeFaultIds.length);
   const milOn = useFaultsStore((s) => s.milOn);
   const s3Left = useCountdown(s3ExpiresAt);

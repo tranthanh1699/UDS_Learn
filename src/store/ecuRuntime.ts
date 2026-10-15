@@ -1,10 +1,16 @@
 import { create } from 'zustand';
-
-import type { SessionKind } from '@/core/vehicle/types';
+import { buildExchange, type Exchange } from '@/core/trace/exchange';
+import { UdsServer } from '@/core/uds/engine';
+import type { Addressing, SessionKind } from '@/core/vehicle/types';
+import { useTraceStore } from './trace';
+import { useVehicleConfigStore } from './vehicleConfig';
 
 export type { SessionKind };
 
-/** Trạng thái chạy của ECU mô phỏng. Engine UDS (giai đoạn 3) sẽ cập nhật store này. */
+/** ECU mô phỏng duy nhất của ứng dụng; store chỉ phản chiếu trạng thái của nó cho React. */
+const server = new UdsServer(useVehicleConfigStore.getState().config);
+useVehicleConfigStore.subscribe((s) => server.setConfig(s.config));
+
 interface EcuRuntimeState {
   session: SessionKind;
   /** null = đang khóa; số = security level đã mở */
@@ -12,11 +18,56 @@ interface EcuRuntimeState {
   /** Thời điểm (ms, Date.now) S3 hết hạn; null khi ở default session */
   s3ExpiresAt: number | null;
   rebooting: boolean;
+  autoTesterPresent: boolean;
+  simulateResponsePending: boolean;
+  /** Exchange gần nhất (dùng cho hiệu ứng gói tin trên hình xe). */
+  lastExchange: Exchange | null;
+  send: (request: number[], addressing: Addressing, opts?: { auto?: boolean }) => Exchange;
+  tick: () => void;
+  setAutoTesterPresent: (on: boolean) => void;
+  setSimulateResponsePending: (on: boolean) => void;
 }
 
-export const useEcuRuntimeStore = create<EcuRuntimeState>(() => ({
-  session: 'default',
-  unlockedLevel: null,
-  s3ExpiresAt: null,
+const snapshot = () => {
+  const s = server.getState();
+  return { session: s.session, unlockedLevel: s.unlockedLevel, s3ExpiresAt: s.s3Deadline };
+};
+
+export const useEcuRuntimeStore = create<EcuRuntimeState>((set, get) => ({
+  ...snapshot(),
   rebooting: false,
+  autoTesterPresent: false,
+  simulateResponsePending: false,
+  lastExchange: null,
+
+  send: (request, addressing, opts = {}) => {
+    const now = Date.now();
+    const config = useVehicleConfigStore.getState().config;
+    const result = server.handleRequest(request, {
+      addressing,
+      now,
+      conditions: config.conditions,
+      simulateResponsePending: get().simulateResponsePending && !opts.auto,
+    });
+    const trace = useTraceStore.getState();
+    const exchange = buildExchange(trace.takeId(), now, config, result, opts.auto);
+    trace.addExchange(exchange);
+    set({ ...snapshot(), ...(opts.auto ? {} : { lastExchange: exchange }) });
+    return exchange;
+  },
+
+  tick: () => {
+    const now = Date.now();
+    const changes = server.tick(now);
+    if (changes.length > 0) {
+      useTraceStore.getState().addEvent(now, changes.map((c) => c.message));
+      set(snapshot());
+    }
+  },
+
+  setAutoTesterPresent: (autoTesterPresent) => set({ autoTesterPresent }),
+  setSimulateResponsePending: (simulateResponsePending) => set({ simulateResponsePending }),
 }));
+
+/** Truy cập engine chỉ để đọc (ví dụ tra metadata service). */
+export const ecuServer: Pick<UdsServer, 'getService' | 'getState'> = server;
