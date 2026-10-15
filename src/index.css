@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Token màu: light mode */
+:root {
+  --bg: 220 20% 97%;
+  --surface: 0 0% 100%;
+  --surface-2: 220 16% 94%;
+  --border: 220 13% 86%;
+  --fg: 222 30% 12%;
+  --muted: 220 9% 42%;
+  --accent: 199 89% 40%;
+  --accent-fg: 0 0% 100%;
+  --ok: 152 60% 36%;
+  --warn: 35 92% 42%;
+  --err: 0 72% 48%;
+
+  --byte-pci: 262 70% 55%;
+  --byte-sid: 217 85% 52%;
+  --byte-sub: 189 85% 38%;
+  --byte-did: 35 92% 45%;
+  --byte-data: 152 60% 36%;
+  --byte-nrc: 0 72% 50%;
+  --byte-pad: 220 9% 60%;
+
+  color-scheme: light;
+}
+
+/* Token màu: dark mode (mặc định) */
+.dark {
+  --bg: 222 30% 7%;
+  --surface: 222 26% 11%;
+  --surface-2: 222 22% 15%;
+  --border: 222 18% 22%;
+  --fg: 210 30% 93%;
+  --muted: 215 14% 62%;
+  --accent: 199 89% 56%;
+  --accent-fg: 222 30% 8%;
+  --ok: 152 62% 50%;
+  --warn: 38 95% 58%;
+  --err: 0 85% 64%;
+
+  --byte-pci: 262 83% 72%;
+  --byte-sid: 213 94% 68%;
+  --byte-sub: 187 85% 55%;
+  --byte-did: 43 96% 58%;
+  --byte-data: 152 62% 55%;
+  --byte-nrc: 0 85% 66%;
+  --byte-pad: 215 14% 45%;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+  }
+  *:focus-visible {
+    @apply outline-none ring-2 ring-accent/70 ring-offset-0;
+  }
+}
+
+@layer components {
+  .hex {
+    @apply font-mono tabular-nums;
+  }
+}
