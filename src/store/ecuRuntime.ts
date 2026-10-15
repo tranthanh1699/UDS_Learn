@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 
-export type SessionKind = 'default' | 'programming' | 'extended';
+import type { SessionKind } from '@/core/vehicle/types';
+
+export type { SessionKind };
 
 /** Trạng thái chạy của ECU mô phỏng. Engine UDS (giai đoạn 3) sẽ cập nhật store này. */
 interface EcuRuntimeState {

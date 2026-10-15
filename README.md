@@ -83,14 +83,14 @@ src/
   lib/               Tiện ích (localStorage an toàn, định dạng số, ...)
 ```
 
-Lưu ý: dự án được xây theo từng giai đoạn. Một số thư mục ở trên (ví dụ `core/`, `assets/svg/`) sẽ được tạo ở các giai đoạn sau.
+Lưu ý: dự án được xây theo từng giai đoạn. Một số thư mục ở trên (ví dụ `core/uds/`, `core/dtc/`, `assets/svg/`) sẽ được tạo ở các giai đoạn sau.
 
 ## Thêm một service mới
 
 Ví dụ thêm service `0x19 ReadDTCInformation`:
 
-1. **Handler**: tạo `src/core/uds/services/0x19.ts`, export metadata (SID, các sub-function, session/security cho phép, độ dài tối thiểu) và hàm handler nhận request PDU, trả về response hoặc NRC kèm lý do bằng tiếng Việt.
-2. **Đăng ký**: thêm service vào danh sách service của engine trong `src/core/uds/engine.ts`. Pipeline NRC dùng metadata để tự kiểm tra các bước chung (SID, session, security, độ dài, sub-function).
+1. **Handler**: tạo `src/core/uds/services/0x19.ts` export một `ServiceDefinition` (xem `src/core/uds/types.ts`): SID, tên ISO, độ dài tối thiểu, session/security cho phép, danh sách sub-function, và hàm `handle(ctx)`. Trong `handle`, dùng `ctx.pass(...)` / `ctx.fail(title, nrc, lý do)` để ghi từng kiểm tra riêng (bước 9 của pipeline), rồi trả về positive response cùng các `effects` (đổi session, ghi DID, ...). Handler không tự sửa trạng thái ECU.
+2. **Đăng ký**: thêm service vào mảng `DEFAULT_SERVICES` trong `src/core/uds/services/index.ts`. Pipeline NRC tự chạy các bước chung 1–8 (SID, session, security, độ dài, sub-function, thứ tự) dựa trên metadata.
 3. **Chuỗi giao diện**: thêm mục `'19'` vào `vi.services` trong `src/i18n/vi.ts` và nội dung bài học vào `src/data/services-meta.ts`.
 4. **Menu**: thêm `'19'` vào `MVP_SERVICES` trong `src/data/navigation.ts`. Trang `/service/19` sẽ tự xuất hiện.
 5. **Test**: viết test byte-exact (request → response) cạnh file handler và chạy `npm test`.

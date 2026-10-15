@@ -1,23 +1,11 @@
 import { create } from 'zustand';
+import type { VehicleConditions } from '@/core/vehicle/types';
+import { DEFAULT_VEHICLE } from '@/data/defaultVehicle';
 
-export type Gear = 'P' | 'R' | 'N' | 'D';
+export type { Gear, VehicleConditions } from '@/core/vehicle/types';
 
-/** Điều kiện xe đang mô phỏng. Giai đoạn 5 sẽ bổ sung cấu hình CAN, DID, security và persistence. */
-export interface VehicleConditions {
-  speedKmh: number;
-  rpm: number;
-  engineRunning: boolean;
-  batteryVoltage: number;
-  gear: Gear;
-}
-
-export const DEFAULT_CONDITIONS: VehicleConditions = {
-  speedKmh: 0,
-  rpm: 0,
-  engineRunning: false,
-  batteryVoltage: 12.6,
-  gear: 'P',
-};
+/** Điều kiện xe đang mô phỏng. Giai đoạn 5 sẽ bổ sung toàn bộ VehicleConfig và persistence. */
+export const DEFAULT_CONDITIONS: VehicleConditions = DEFAULT_VEHICLE.conditions;
 
 interface VehicleConfigState {
   conditions: VehicleConditions;
