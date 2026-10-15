@@ -23,7 +23,7 @@ export interface NavGroup {
 }
 
 /** Các service MVP theo thứ tự hiển thị. Thêm service mới: thêm SID vào đây và vào vi.services. */
-export const MVP_SERVICES: ServiceSidKey[] = ['10', '11', '22', '27', '2E', '3E'];
+export const MVP_SERVICES: ServiceSidKey[] = ['10', '11', '19', '22', '27', '2E', '3E'];
 
 export const NAV_GROUPS: NavGroup[] = [
   {

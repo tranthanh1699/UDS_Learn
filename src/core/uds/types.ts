@@ -32,6 +32,18 @@ export interface RequestContext {
   conditions: VehicleConditions;
   /** Giả lập ECU xử lý lâu: gửi NRC 0x78 trước response thật. */
   simulateResponsePending?: boolean;
+  /** Bộ nhớ DTC của ECU này (chỉ đọc), dùng cho 0x19. Không có = ECU chưa có DTC nào. */
+  dtcs?: readonly DtcRecordView[];
+}
+
+/** Một DTC nhìn từ phía Dcm: mã 3 byte, status byte và dữ liệu phụ cho 0x19 04/06. */
+export interface DtcRecordView {
+  dtc: number;
+  status: number;
+  occurrence: number;
+  agingCounter: number;
+  /** Ảnh chụp điều kiện xe lúc lỗi được xác nhận lần đầu (snapshot / freeze frame). */
+  snapshot: VehicleConditions | null;
 }
 
 export type StepId =
@@ -127,6 +139,8 @@ export interface ServiceContext {
   state: Readonly<EcuState>;
   /** Sinh n byte ngẫu nhiên (engine có thể thay bằng nguồn tất định khi test). */
   randomBytes(n: number): number[];
+  /** Danh sách DTC ECU hỗ trợ cùng trạng thái hiện tại. */
+  dtcs: readonly DtcRecordView[];
   /** Ghi nhận một kiểm tra riêng của service đã đạt. */
   pass(title: string, reason: string): void;
   /** Ghi nhận một kiểm tra riêng thất bại và trả về kết quả negative tương ứng. */

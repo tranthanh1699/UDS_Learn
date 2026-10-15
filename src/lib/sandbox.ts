@@ -1,8 +1,10 @@
+import { DEFAULT_DTC_CONFIG, defaultCatalog } from '@/core/dtc/catalog';
+import { dtcViewsForEcu, endOperationCycle, initialDtcState, injectFault, runTests, startOperationCycle } from '@/core/dtc/faultModel';
 import { buildExchange, type Exchange } from '@/core/trace/exchange';
 import { UdsServer } from '@/core/uds/engine';
 import { computeKey } from '@/core/uds/keyAlgorithm';
-import type { UdsResult } from '@/core/uds/types';
-import type { VehicleConfig } from '@/core/vehicle/types';
+import type { DtcRecordView, UdsResult } from '@/core/uds/types';
+import type { VehicleConditions, VehicleConfig } from '@/core/vehicle/types';
 import type { ServiceExample } from '@/data/services-meta';
 
 /** Bộ sinh số ngẫu nhiên có hạt giống (mulberry32) để seed trong ví dụ không đổi giữa các lần hiển thị. */
@@ -28,6 +30,19 @@ function sendKeyRequest(config: VehicleConfig, setupResults: UdsResult[], mode: 
   return [0x27, level + 1, ...key];
 }
 
+/** Bộ nhớ DTC của Engine ECU sau khi inject lỗi và chạy số operation cycle yêu cầu. */
+export function buildDtcViews(setup: NonNullable<ServiceExample['dtcSetup']>, conditions: VehicleConditions): DtcRecordView[] {
+  const catalog = defaultCatalog();
+  let s = initialDtcState(catalog);
+  for (const id of setup.inject) s = injectFault(s, id);
+  for (let cycle = 0; cycle < setup.cycles; cycle++) {
+    if (cycle > 0) s = endOperationCycle(s, DEFAULT_DTC_CONFIG).state;
+    s = startOperationCycle(s).state;
+    for (let i = 0; i < 3; i++) s = runTests(s, catalog, DEFAULT_DTC_CONFIG, conditions).state;
+  }
+  return dtcViewsForEcu(s, catalog, 'engine');
+}
+
 /**
  * Chạy một ví dụ trên ECU tạm (không ảnh hưởng ECU chính) và trả về exchange với frame thật.
  * Thời gian bắt đầu từ 0 để timestamp trong ví dụ dễ đọc.
@@ -38,6 +53,7 @@ export function runExample(config: VehicleConfig, example: ServiceExample, rando
   const setupResults = (example.setup ?? []).map((req) => ecu.handleRequest(req, { addressing: 'physical', now: 0, conditions }));
   if (example.setupState) ecu.patchState(example.setupState);
   const request = example.sendKeyFromSetup ? sendKeyRequest(config, setupResults, example.sendKeyFromSetup) : example.request;
-  const result = ecu.handleRequest(request, { addressing: example.addressing ?? 'physical', now: 0, conditions });
+  const dtcs = example.dtcSetup ? buildDtcViews(example.dtcSetup, conditions) : undefined;
+  const result = ecu.handleRequest(request, { addressing: example.addressing ?? 'physical', now: 0, conditions, dtcs });
   return buildExchange(0, 0, config, result);
 }

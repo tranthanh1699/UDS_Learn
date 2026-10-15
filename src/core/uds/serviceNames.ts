@@ -26,6 +26,7 @@ export const SERVICE_NAMES: Record<number, string> = {
 export const SERVICE_ISO_REFS: Record<number, string> = {
   0x10: 'ISO 14229-1, mục 10.2',
   0x11: 'ISO 14229-1, mục 10.3',
+  0x19: 'ISO 14229-1, mục 12.3',
   0x27: 'ISO 14229-1, mục 10.4',
   0x3e: 'ISO 14229-1, mục 10.7',
   0x22: 'ISO 14229-1, mục 11.2',

@@ -15,6 +15,15 @@ const EXPECTED: Record<string, Record<string, string | number>> = {
     'TesterPresent không cần response': 'suppressed',
     'Functional request với sub-function sai': 'noResponse',
   },
+  '19': {
+    'Đếm DTC đã confirmed': 'positive',
+    'Liệt kê DTC đã confirmed': 'positive',
+    'Lỗi mới xuất hiện một cycle: pending nhưng chưa confirmed': 'positive',
+    'Toàn bộ DTC hỗ trợ (response nhiều frame)': 'positive',
+    'Snapshot của DTC': 'positive',
+    'Extended data của DTC': 'positive',
+    'DTC của ECU khác': 0x31,
+  },
   '22': {
     'Đọc VIN (response nhiều frame)': 'positive',
     'Đọc nhiều DID trong một request': 'positive',
@@ -66,6 +75,17 @@ describe('ví dụ trong nội dung học khớp với engine', () => {
       });
     });
   }
+
+  it('ví dụ 0x19 cho đúng byte như mô tả', () => {
+    const run = (title: string) => runExample(DEFAULT_VEHICLE, SERVICES_META['19']!.examples.find((e) => e.title === title)!).result.response;
+    expect(run('Đếm DTC đã confirmed')).toEqual([0x59, 0x01, 0xff, 0x01, 0x00, 0x01]);
+    expect(run('Liệt kê DTC đã confirmed')).toEqual([0x59, 0x02, 0xff, 0x01, 0x30, 0x13, 0xaf]);
+    expect(run('Lỗi mới xuất hiện một cycle: pending nhưng chưa confirmed')).toEqual([0x59, 0x02, 0xff, 0x01, 0x30, 0x13, 0x27]);
+    expect(run('Toàn bộ DTC hỗ trợ (response nhiều frame)')).toHaveLength(39);
+    // record 01, 3 DID: 0100 = 00 km/h, 0101 = 03 52 (850 rpm), 0102 = 8A (13,8 V)
+    expect(run('Snapshot của DTC')!.slice(6)).toEqual([0x01, 0x03, 0x01, 0x00, 0x00, 0x01, 0x01, 0x03, 0x52, 0x01, 0x02, 0x8a]);
+    expect(run('Extended data của DTC')!.slice(6)).toEqual([0x01, 0x02, 0x02, 0x00]);
+  });
 
   it('ví dụ ghi VIN thành công dùng request nhiều frame (FF + FC + CF)', () => {
     const ex = SERVICES_META['2E']!.examples.find((e) => e.title.startsWith('Ghi VIN thành công'))!;

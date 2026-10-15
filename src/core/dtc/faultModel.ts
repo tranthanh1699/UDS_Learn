@@ -1,4 +1,5 @@
 import { vi } from '../../i18n/vi';
+import type { DtcRecordView } from '../uds/types';
 import type { VehicleConditions } from '../vehicle/types';
 import {
   STATUS_AFTER_CLEAR,
@@ -231,4 +232,14 @@ export function effectiveConditions(base: VehicleConditions, injected: readonly 
     if (entry.component.startsWith('wss')) c.speedValid = false;
   }
   return c;
+}
+
+/** DTC của một ECU theo dạng Dcm đọc được (thứ tự theo danh mục). */
+export function dtcViewsForEcu(state: DtcMemoryState, catalog: readonly FaultCatalogEntry[], ecu: FaultCatalogEntry['ecu']): DtcRecordView[] {
+  return catalog
+    .filter((c) => c.ecu === ecu)
+    .map((c) => {
+      const ev = state.events[c.id]!;
+      return { dtc: c.dtc, status: ev.status, occurrence: ev.occurrence, agingCounter: ev.agingCounter, snapshot: ev.snapshot };
+    });
 }

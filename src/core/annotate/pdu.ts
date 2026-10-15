@@ -1,4 +1,6 @@
 import { vi } from '../../i18n/vi';
+import { formatDtc } from '../dtc/catalog';
+import { STATUS_BIT_NAMES } from '../dtc/types';
 import { NEGATIVE_RESPONSE_SID, nrcName } from '../uds/nrc';
 import { NRC_ISO_REF, SERVICE_ISO_REFS, serviceName } from '../uds/serviceNames';
 import { DEFAULT_SERVICES } from '../uds/services';
@@ -258,7 +260,97 @@ export function annotatePdu(pdu: readonly number[], ctx: PduContext): PduField[]
     return fields;
   }
 
+  if (reqSid === 0x19 && pos === 2) return [...fields, ...annotate19(pdu, ctx)];
+
   const extra = (reqSid === 0x10 || reqSid === 0x3e || reqSid === 0x11) && (ctx.direction === 'request' || reqSid === 0x11);
   return [...fields, ...rest(pdu, pos, extra ? 'extra' : 'data')];
 }
 
+
+/** Phân tích 8 bit của một status byte / status mask. */
+function statusBits(value: number): BitInfo[] {
+  return [7, 6, 5, 4, 3, 2, 1, 0].map((bit) => ({
+    range: String(bit),
+    name: STATUS_BIT_NAMES[bit]!,
+    value: String((value >> bit) & 1),
+    meaning: vi.dtc.bits[bit]!,
+  }));
+}
+
+const ISO19 = SERVICE_ISO_REFS[0x19];
+
+/** Trường riêng của 0x19 ReadDTCInformation (sau SID và sub-function). */
+function annotate19(pdu: readonly number[], ctx: PduContext): PduField[] {
+  const sub = pdu[1]! & 0x7f;
+  const out: PduField[] = [];
+  const one = (start: number, fieldId: string, field: string, meaning: string, kind: PduField['kind'] = 'data', bits?: BitInfo[]): void => {
+    if (start < pdu.length) out.push({ start, length: 1, kind, fieldId, field, meaning, bits, isoRef: ISO19 });
+  };
+  const dtcAt = (start: number, id: string): void => {
+    if (start + 2 >= pdu.length) return;
+    const dtc = (pdu[start]! << 16) | (pdu[start + 1]! << 8) | pdu[start + 2]!;
+    out.push({ start, length: 3, kind: 'did', fieldId: id, field: f.dtc, meaning: m.dtcCode(formatDtc(dtc)), isoRef: ISO19 });
+  };
+  const statusAt = (start: number, id: string): void => one(start, id, f.dtcStatus, m.dtcStatus(hex(pdu[start] ?? 0)), 'data', statusBits(pdu[start] ?? 0));
+
+  if (ctx.direction === 'request') {
+    if (sub === 0x01 || sub === 0x02) one(2, 'mask', f.statusMask, m.statusMask(hex(pdu[2] ?? 0)), 'data', statusBits(pdu[2] ?? 0));
+    if (sub === 0x04 || sub === 0x06) {
+      dtcAt(2, 'dtc');
+      const rec = hex(pdu[5] ?? 0);
+      one(5, 'record', f.recordNumber, sub === 0x04 ? m.snapshotRecordReq(rec) : m.extRecordReq(rec));
+    }
+    return out;
+  }
+
+  if (sub === 0x01) {
+    one(2, 'avail', f.availabilityMask, m.availabilityMask(hex(pdu[2] ?? 0)), 'data', statusBits(pdu[2] ?? 0));
+    one(3, 'format', f.formatId, m.formatId(hex(pdu[3] ?? 0)));
+    if (pdu.length >= 6) out.push({ start: 4, length: 2, kind: 'data', fieldId: 'count', field: f.dtcCount, meaning: m.dtcCount((pdu[4]! << 8) | pdu[5]!), isoRef: ISO19 });
+    return out;
+  }
+  if (sub === 0x02 || sub === 0x0a) {
+    one(2, 'avail', f.availabilityMask, m.availabilityMask(hex(pdu[2] ?? 0)), 'data', statusBits(pdu[2] ?? 0));
+    for (let p = 3; p + 3 < pdu.length; p += 4) {
+      dtcAt(p, `dtc-${p}`);
+      statusAt(p + 3, `status-${p}`);
+    }
+    return out;
+  }
+  if (sub === 0x04 || sub === 0x06) {
+    dtcAt(2, 'dtc');
+    statusAt(5, 'status');
+    let p = 6;
+    if (sub === 0x04 && p < pdu.length) {
+      one(p, 'snapRec', f.recordNumber, m.snapshotRecord(hex(pdu[p]!)));
+      const count = pdu[p + 1] ?? 0;
+      one(p + 1, 'snapCount', f.numberOfIdentifiers, m.numberOfIdentifiers(count));
+      p += 2;
+      for (let i = 0; i < count && p + 1 < pdu.length; i++) {
+        const did = (pdu[p]! << 8) | pdu[p + 1]!;
+        const def = ctx.config.dids.find((d) => d.did === did);
+        const len = def?.length ?? 1;
+        out.push({ start: p, length: 2, kind: 'did', fieldId: `sdid-${p}`, field: f.snapshotDid, meaning: m.snapshotDid(hex(did, 4), def?.name ?? '?'), isoRef: ISO19 });
+        const data = pdu.slice(p + 2, p + 2 + len);
+        out.push({
+          start: p + 2,
+          length: data.length,
+          kind: 'data',
+          fieldId: `sdata-${p}`,
+          field: f.snapshotData,
+          meaning: m.snapshotData(def ? decodeDidValue(def, data) : hexBytes(data)),
+          isoRef: ISO19,
+        });
+        p += 2 + len;
+      }
+    }
+    if (sub === 0x06) {
+      for (; p + 1 < pdu.length; p += 2) {
+        const rec = pdu[p]!;
+        one(p, `ext-${p}`, f.recordNumber, m.extRecordNumber(hex(rec)));
+        one(p + 1, `extd-${p}`, f.extData, rec === 0x01 ? m.extOccurrence(pdu[p + 1]!) : m.extAging(pdu[p + 1]!));
+      }
+    }
+  }
+  return out;
+}

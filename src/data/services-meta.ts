@@ -29,6 +29,11 @@ export interface ServiceExample {
    * 'correct' = key đúng, 'wrong' = key sai (đảo byte cuối).
    */
   sendKeyFromSetup?: 'correct' | 'wrong';
+  /**
+   * 0x19: tạo bộ nhớ DTC bằng mô hình lỗi: inject các lỗi (id trong danh mục) rồi chạy N operation cycle,
+   * mỗi cycle chạy test 3 lần (cycle cuối vẫn đang chạy).
+   */
+  dtcSetup?: { inject: string[]; cycles: number };
 }
 
 export interface ServiceFormSpec {
@@ -40,6 +45,8 @@ export interface ServiceFormSpec {
   defaultDids?: number[];
   /** Chọn một DID ghi được và nhập dữ liệu (0x2E). */
   writeDid?: boolean;
+  /** Sub-function của 0x19 kèm status mask, DTC và số record. */
+  dtcRead?: boolean;
 }
 
 export interface ServiceLearnContent {
@@ -572,9 +579,140 @@ const sid11: ServiceLearnContent = {
   ],
 };
 
+/** Lỗi O2 hở mạch qua 2 operation cycle → DTC P0130-13 confirmed; động cơ đang chạy khi lỗi xảy ra. */
+const O2_CONFIRMED = { inject: ['o2Sensor:openCircuit'], cycles: 2 };
+const O2_PENDING = { inject: ['o2Sensor:openCircuit'], cycles: 1 };
+const RUNNING = { engineRunning: true, rpm: 850, batteryVoltage: 13.8 };
+
+const sid19: ServiceLearnContent = {
+  sid: '19',
+  isoRef: 'ISO 14229-1, mục 12.3',
+  purpose:
+    'ReadDTCInformation đọc bộ nhớ lỗi của ECU: có bao nhiêu DTC, DTC nào đang ở trạng thái nào (status byte), điều kiện xe lúc lỗi xảy ra (snapshot / freeze frame) và dữ liệu phụ như số lần lỗi xảy ra. Đây là service được dùng nhiều nhất khi chẩn đoán lỗi trong xưởng.',
+  useCases: [
+    'Bắt đầu chẩn đoán: 19 02 với mask 0x08 để xem các DTC đã confirmed (lỗi thật, đã được xác nhận).',
+    'Đếm nhanh số DTC trước khi đọc chi tiết: 19 01.',
+    'Xem điều kiện xe lúc lỗi xảy ra (tốc độ, RPM, điện áp) để tái hiện lỗi: 19 04.',
+    'Biết lỗi đã xảy ra bao nhiêu lần, đã "lành" được bao nhiêu cycle: 19 06.',
+    'Liệt kê toàn bộ DTC mà ECU có thể báo: 19 0A.',
+  ],
+  requestTable: [
+    { byte: '0', field: 'SID', size: '1 byte', value: '0x19', meaning: 'ReadDTCInformation' },
+    { byte: '1', field: 'Sub-function', size: '1 byte', value: '0x01 / 0x02 / 0x04 / 0x06 / 0x0A', meaning: 'reportType: loại thông tin cần đọc.' },
+    { byte: '2', field: 'DTC status mask', size: '1 byte', value: 'ví dụ 0x08', meaning: 'Chỉ có ở 01/02: ECU chọn các DTC có (status & mask) ≠ 0.' },
+    { byte: '2–4', field: 'DTC', size: '3 byte', value: 'ví dụ 01 30 13', meaning: 'Chỉ có ở 04/06: DTC cần đọc chi tiết.' },
+    { byte: '5', field: 'Số record', size: '1 byte', value: '0x01 / 0xFF', meaning: 'Chỉ có ở 04/06: snapshot record hoặc extended data record cần đọc; 0xFF = tất cả.' },
+  ],
+  responseTable: [
+    { byte: '0', field: 'Response SID', size: '1 byte', value: '0x59', meaning: '0x19 + 0x40' },
+    { byte: '1', field: 'Sub-function', size: '1 byte', value: 'như request', meaning: 'ECU lặp lại reportType.' },
+    { byte: '2', field: 'DTCStatusAvailabilityMask', size: '1 byte', value: '0xFF', meaning: '01/02/0A: các bit status ECU hỗ trợ.' },
+    { byte: '3–5', field: '01: format + số DTC', size: '1 + 2 byte', value: '01 00 01', meaning: 'DTCFormatIdentifier rồi số DTC khớp mask.' },
+    { byte: '3–…', field: '02/0A: danh sách', size: '4 byte mỗi DTC', value: '01 30 13 AF …', meaning: 'Mỗi DTC 3 byte rồi status byte của nó.' },
+    {
+      byte: '2–…',
+      field: '04/06: chi tiết',
+      size: '…',
+      value: '01 30 13 AF 01 …',
+      meaning: 'DTC + status, rồi các record: snapshot (số record, số DID, DID + dữ liệu) hoặc extended data (số record + dữ liệu).',
+    },
+  ],
+  subFunctions: [
+    { value: '0x01', name: 'reportNumberOfDTCByStatusMask', meaning: 'Đếm số DTC khớp status mask.' },
+    { value: '0x02', name: 'reportDTCByStatusMask', meaning: 'Liệt kê các DTC khớp status mask kèm status byte.' },
+    { value: '0x04', name: 'reportDTCSnapshotRecordByDTCNumber', meaning: 'Snapshot (freeze frame) của một DTC. Simulator có record 0x01 gồm DID 0x0100 tốc độ, 0x0101 RPM, 0x0102 điện áp.' },
+    { value: '0x06', name: 'reportDTCExtDataRecordByDTCNumber', meaning: 'Extended data của một DTC. Simulator có record 0x01 = số lần xảy ra, 0x02 = bộ đếm aging.' },
+    { value: '0x0A', name: 'reportSupportedDTC', meaning: 'Mọi DTC mà ECU hỗ trợ, kể cả DTC chưa từng lỗi.' },
+    { value: 'khác', name: '', meaning: 'ISO 14229-1 còn nhiều reportType khác; simulator trả NRC 0x12.' },
+  ],
+  nrcs: [
+    { nrc: 0x12, trigger: 'reportType chưa hỗ trợ, ví dụ 19 03.' },
+    { nrc: 0x13, trigger: 'Sai độ dài: 01/02 cần 3 byte, 04/06 cần 6 byte, 0A cần 2 byte.' },
+    { nrc: 0x31, trigger: 'DTC không thuộc ECU này (ví dụ DTC của ABS ECU), hoặc số record không có (khác 01/02/FF).' },
+    { nrc: 0x14, trigger: 'Danh sách DTC dài hơn giới hạn response của ECU.' },
+  ],
+  examples: [
+    {
+      title: 'Đếm DTC đã confirmed',
+      description: 'Lỗi O2 hở mạch đã xảy ra trong 2 operation cycle nên P0130-13 confirmed. Mask 0x08 chọn DTC có bit 3 confirmedDTC: có 1 DTC.',
+      request: [0x19, 0x01, 0x08],
+      dtcSetup: O2_CONFIRMED,
+      conditions: RUNNING,
+    },
+    {
+      title: 'Liệt kê DTC đã confirmed',
+      description: 'Response gồm DTC 01 30 13 (P0130-13) và status 0xAF: testFailed, testFailedThisOperationCycle, pendingDTC, confirmedDTC, testFailedSinceLastClear, warningIndicatorRequested.',
+      request: [0x19, 0x02, 0x08],
+      dtcSetup: O2_CONFIRMED,
+      conditions: RUNNING,
+    },
+    {
+      title: 'Lỗi mới xuất hiện một cycle: pending nhưng chưa confirmed',
+      description: 'Sau 1 cycle, mask 0x08 không thấy gì nhưng mask 0x04 (pendingDTC) thấy P0130-13 với status 0x27.',
+      request: [0x19, 0x02, 0x04],
+      dtcSetup: O2_PENDING,
+      conditions: RUNNING,
+    },
+    {
+      title: 'Toàn bộ DTC hỗ trợ (response nhiều frame)',
+      description: 'Engine ECU hỗ trợ 9 DTC; response dài 39 byte nên được chia thành First Frame + Consecutive Frame.',
+      request: [0x19, 0x0a],
+      dtcSetup: O2_CONFIRMED,
+      conditions: RUNNING,
+    },
+    {
+      title: 'Snapshot của DTC',
+      description: 'Record 0x01 chụp lúc lỗi được xác nhận lần đầu: tốc độ 0 km/h, RPM 850 (03 52), điện áp 13,8 V (0x8A).',
+      request: [0x19, 0x04, 0x01, 0x30, 0x13, 0x01],
+      dtcSetup: O2_CONFIRMED,
+      conditions: RUNNING,
+    },
+    {
+      title: 'Extended data của DTC',
+      description: 'Record 0x01 = lỗi đã xảy ra 2 lần (2 cycle), record 0x02 = bộ đếm aging 0 (chưa có cycle nào không lỗi).',
+      request: [0x19, 0x06, 0x01, 0x30, 0x13, 0xff],
+      dtcSetup: O2_CONFIRMED,
+      conditions: RUNNING,
+    },
+    {
+      title: 'DTC của ECU khác',
+      description: 'C0035-13 (cảm biến tốc độ bánh) nằm trong ABS ECU, không phải Engine ECU đang được hỏi: NRC 0x31.',
+      request: [0x19, 0x04, 0x40, 0x35, 0x13, 0x01],
+      dtcSetup: O2_CONFIRMED,
+    },
+  ],
+  mistakes: [
+    'Dùng mask 0xFF rồi thấy "rất nhiều lỗi": DTC chưa từng chạy test có status 0x50 (bit 4 và 6) cũng khớp. Muốn xem lỗi thật hãy dùng 0x08 (confirmed) hoặc 0x0D.',
+    'Nhầm pendingDTC với confirmedDTC: pending chỉ là lỗi mới xuất hiện, chưa đủ số cycle để xác nhận.',
+    'Đọc DTC sai ECU: mỗi ECU giữ DTC của riêng nó; DTC cảm biến tốc độ bánh phải hỏi ABS ECU.',
+    'Quên rằng response 02/0A có thể rất dài và được chia nhiều frame: tester phải gửi Flow Control.',
+    'Tưởng snapshot là giá trị hiện tại: snapshot là điều kiện lúc lỗi xảy ra, không đổi theo thời gian.',
+  ],
+  autosar: {
+    intro: 'Dcm xử lý giao thức 0x19, còn dữ liệu DTC do Dem cung cấp qua các API lọc DTC.',
+    items: [
+      { name: 'Dem_SetDTCFilter / Dem_GetNumberOfFilteredDTC / Dem_GetNextFilteredDTC', desc: 'Dcm đặt bộ lọc theo status mask rồi đếm (19 01) hoặc lấy lần lượt từng DTC (19 02).' },
+      { name: 'DemDtcStatusAvailabilityMask', desc: 'Các bit status mà ECU hỗ trợ; giá trị này đi vào byte thứ 3 của response.' },
+      { name: 'DemFreezeFrameClass', desc: 'Danh sách DID được chụp khi lỗi xảy ra (snapshot) cho 19 04.' },
+      { name: 'DemExtendedDataClass', desc: 'Các extended data record (occurrence counter, aging counter...) cho 19 06.' },
+    ],
+  },
+  form: { dtcRead: true },
+  exercises: [
+    { title: '', description: '', request: [0x19, 0x01, 0x08], dtcSetup: O2_CONFIRMED, conditions: RUNNING },
+    { title: '', description: '', request: [0x19, 0x02, 0x08], dtcSetup: O2_CONFIRMED, conditions: RUNNING },
+    { title: '', description: '', request: [0x19, 0x02, 0x04], dtcSetup: O2_PENDING, conditions: RUNNING },
+    { title: '', description: '', request: [0x19, 0x04, 0x01, 0x30, 0x13, 0x01], dtcSetup: O2_CONFIRMED, conditions: RUNNING },
+    { title: '', description: '', request: [0x19, 0x06, 0x01, 0x30, 0x13, 0xff], dtcSetup: O2_CONFIRMED, conditions: RUNNING },
+    { title: '', description: '', request: [0x19, 0x04, 0x40, 0x35, 0x13, 0x01], dtcSetup: O2_CONFIRMED },
+    { title: '', description: '', request: [0x19, 0x03] },
+  ],
+};
+
 export const SERVICES_META: Partial<Record<ServiceSidKey, ServiceLearnContent>> = {
   '10': sid10,
   '11': sid11,
+  '19': sid19,
   '22': sid22,
   '27': sid27,
   '2E': sid2E,

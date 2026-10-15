@@ -118,6 +118,7 @@ export class UdsServer {
       config: this.config,
       state: this.state,
       randomBytes: (n) => Array.from({ length: n }, () => Math.floor(this.random() * 256) & 0xff),
+      dtcs: ctx.dtcs ?? [],
     });
 
     const hasSub = def?.subFunctions !== undefined && request.length >= 2;

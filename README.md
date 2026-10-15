@@ -6,7 +6,7 @@ Toàn bộ chạy trong trình duyệt: không cần backend, không cần datab
 
 ## Tính năng
 
-- **6 service UDS**: 0x10 DiagnosticSessionControl, 0x11 ECUReset, 0x22 ReadDataByIdentifier, 0x27 SecurityAccess, 0x2E WriteDataByIdentifier, 0x3E TesterPresent. Mỗi service có 3 tab: **Học** (cấu trúc byte, sub-function, NRC, ma trận session × security, sơ đồ trao đổi, ví dụ với CAN frame thật, góc nhìn AUTOSAR), **Thực hành** (tạo request bằng biểu mẫu hoặc hex thô, xem quy trình ECU kiểm tra NRC từng bước) và **Bài tập decode**.
+- **7 service UDS**: 0x10 DiagnosticSessionControl, 0x11 ECUReset, 0x19 ReadDTCInformation (01, 02, 04, 06, 0A), 0x22 ReadDataByIdentifier, 0x27 SecurityAccess, 0x2E WriteDataByIdentifier, 0x3E TesterPresent. Mỗi service có 3 tab: **Học** (cấu trúc byte, sub-function, NRC, ma trận session × security, sơ đồ trao đổi, ví dụ với CAN frame thật, góc nhìn AUTOSAR), **Thực hành** (tạo request bằng biểu mẫu hoặc hex thô, xem quy trình ECU kiểm tra NRC từng bước) và **Bài tập decode**.
 - **Soi từng byte**: mỗi byte của CAN frame có màu theo loại trường (PCI, SID, sub-function, DID, dữ liệu, NRC, padding); bấm vào để xem giải thích tiếng Việt, phân tích bit và mục tham chiếu ISO.
 - **ISO-TP đầy đủ**: Single/First/Consecutive Frame, Flow Control, BS/STmin, Classic CAN và CAN FD, padding tùy chọn.
 - **Cấu hình xe**: CAN ID 11/29-bit, bảng DID, security level và thuật toán key, điều kiện xe (tốc độ, RPM, điện áp, số), lưu tự động và nhập/xuất JSON.
@@ -100,16 +100,16 @@ src/
   lib/                 Tiện ích (localStorage an toàn, ECU tạm cho ví dụ, ...)
 ```
 
-Mô hình DTC đã sẵn sàng cho giai đoạn sau: `core/dtc/faultModel.ts` có `clearDtcs` (cho 0x14), status byte theo bit ISO và ảnh chụp điều kiện xe khi lỗi (cho 0x19 04), và cờ `dtcSettingOn` (cho 0x85).
+0x19 đọc DTC trực tiếp từ mô hình lỗi (`core/dtc/faultModel.ts` → `dtcViewsForEcu`); ECU mô phỏng là Engine ECU nên chỉ báo DTC của chính nó. Mô hình DTC đã sẵn sàng cho các service tiếp theo: `clearDtcs` (cho 0x14) và cờ `dtcSettingOn` (cho 0x85).
 
 ## Thêm một service mới
 
-Ví dụ thêm service `0x19 ReadDTCInformation`:
+Ví dụ thêm service `0x14 ClearDiagnosticInformation`:
 
-1. **Handler**: tạo `src/core/uds/services/0x19.ts` export một `ServiceDefinition` (xem `src/core/uds/types.ts`): SID, tên ISO, độ dài tối thiểu, session/security cho phép, danh sách sub-function, và hàm `handle(ctx)`. Trong `handle`, dùng `ctx.pass(...)` / `ctx.fail(title, nrc, lý do)` để ghi từng kiểm tra riêng (bước 9 của pipeline), rồi trả về positive response cùng các `effects` (đổi session, ghi DID, ...). Handler không tự sửa trạng thái ECU.
+1. **Handler**: tạo `src/core/uds/services/0x14.ts` export một `ServiceDefinition` (xem `src/core/uds/types.ts`): SID, tên ISO, độ dài tối thiểu, session/security cho phép, danh sách sub-function, và hàm `handle(ctx)`. Trong `handle`, dùng `ctx.pass(...)` / `ctx.fail(title, nrc, lý do)` để ghi từng kiểm tra riêng (bước 9 của pipeline), rồi trả về positive response cùng các `effects` (đổi session, ghi DID, ...). Handler không tự sửa trạng thái ECU.
 2. **Đăng ký**: thêm service vào mảng `DEFAULT_SERVICES` trong `src/core/uds/services/index.ts`. Pipeline NRC tự chạy các bước chung 1–8 (SID, session, security, độ dài, sub-function, thứ tự) dựa trên metadata.
-3. **Chuỗi giao diện**: thêm mục `'19'` vào `vi.services` trong `src/i18n/vi.ts` và nội dung bài học vào `src/data/services-meta.ts`.
-4. **Menu**: thêm `'19'` vào `MVP_SERVICES` trong `src/data/navigation.ts`. Trang `/service/19` sẽ tự xuất hiện.
+3. **Chuỗi giao diện**: thêm mục `'14'` vào `vi.services` trong `src/i18n/vi.ts` và nội dung bài học vào `src/data/services-meta.ts`.
+4. **Menu**: thêm `'14'` vào `MVP_SERVICES` trong `src/data/navigation.ts`. Trang `/service/14` sẽ tự xuất hiện.
 5. **Chú thích byte**: nếu service có trường riêng (ví dụ DTC + status byte), bổ sung nhánh tương ứng trong `src/core/annotate/pdu.ts`.
 6. **Test**: viết test byte-exact (request → response) cạnh file handler và chạy `npm test`. Test `src/data/services-meta.test.ts` sẽ kiểm tra các ví dụ trong nội dung học có ra đúng kết quả mô tả.
 

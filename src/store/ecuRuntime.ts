@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { buildExchange, type Exchange } from '@/core/trace/exchange';
 import { initialEcuState, UdsServer } from '@/core/uds/engine';
 import type { Addressing, SessionKind } from '@/core/vehicle/types';
-import { getEffectiveConditions } from './faults';
+import { dtcViewsForEcu } from '@/core/dtc/faultModel';
+import { getEffectiveConditions, useFaultsStore } from './faults';
 import { useTraceStore } from './trace';
 import { useVehicleConfigStore } from './vehicleConfig';
 
@@ -52,6 +53,8 @@ export const useEcuRuntimeStore = create<EcuRuntimeState>((set, get) => ({
       addressing,
       now,
       conditions: getEffectiveConditions(),
+      // ECU mô phỏng là Engine ECU: chỉ báo các DTC thuộc chính nó
+      dtcs: dtcViewsForEcu(useFaultsStore.getState().dtc, useFaultsStore.getState().catalog, 'engine'),
       simulateResponsePending: get().simulateResponsePending && !opts.auto,
     });
     const trace = useTraceStore.getState();

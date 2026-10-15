@@ -5,6 +5,8 @@ import { formatCanId } from '@/core/can/frame';
 import { maxSingleFramePayload } from '@/core/isotp/config';
 import { decodePci } from '@/core/isotp/pci';
 import { previewRequestFrames } from '@/core/trace/exchange';
+import { formatDtc } from '@/core/dtc/catalog';
+import { STATUS_BIT_NAMES } from '@/core/dtc/types';
 import { computeKey } from '@/core/uds/keyAlgorithm';
 import { hex, hexBytes, parseHexBytes } from '@/core/util/hex';
 import type { Addressing, DidDefinition, VehicleConfig } from '@/core/vehicle/types';
@@ -15,6 +17,7 @@ import { ByteRow } from '@/components/frames/ByteRow';
 import { FrameCard } from '@/components/frames/FrameCard';
 import { Button } from '@/components/ui/Button';
 import { Switch } from '@/components/ui/Switch';
+import { useFaultsStore } from '@/store/faults';
 
 const p = vi.practice;
 const t27 = vi.uds.service27;
@@ -53,7 +56,46 @@ interface RequestBuilderProps {
   lastSeed?: { level: number; seed: number[] } | null;
 }
 
+const DTC_REPORT_TYPES = [
+  { id: 0x01, label: '01 reportNumberOfDTCByStatusMask' },
+  { id: 0x02, label: '02 reportDTCByStatusMask' },
+  { id: 0x04, label: '04 reportDTCSnapshotRecordByDTCNumber' },
+  { id: 0x06, label: '06 reportDTCExtDataRecordByDTCNumber' },
+  { id: 0x0a, label: '0A reportSupportedDTC' },
+];
+
+/** Chọn status mask cho 0x19 01/02 bằng 8 nút bit, kèm tên bit. */
+function StatusMaskPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <span className="block text-xs font-medium text-muted">
+        {p.statusMask} = <span className="hex text-fg">0x{hex(value)}</span>
+      </span>
+      <div className="grid grid-cols-4 gap-1 sm:grid-cols-8">
+        {[7, 6, 5, 4, 3, 2, 1, 0].map((bit) => {
+          const on = ((value >> bit) & 1) === 1;
+          return (
+            <button
+              key={bit}
+              type="button"
+              aria-pressed={on}
+              title={vi.dtc.bits[bit]}
+              onClick={() => onChange(value ^ (1 << bit))}
+              className={cn('rounded border px-1 py-1 text-center', on ? 'border-accent bg-accent/15 text-accent' : 'border-border text-muted')}
+            >
+              <div className="hex text-xs font-semibold">bit{bit}</div>
+              <div className="break-all text-[9px] leading-tight">{STATUS_BIT_NAMES[bit]}</div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted">{p.statusMaskHint}</p>
+    </div>
+  );
+}
+
 export function RequestBuilder({ sid, form, config, onSend, lastSeed }: RequestBuilderProps) {
+  const catalog = useFaultsStore((s) => s.catalog);
   const subOptions = useMemo(
     () =>
       form.securityLevels
@@ -61,7 +103,9 @@ export function RequestBuilder({ sid, form, config, onSend, lastSeed }: RequestB
             { id: l.level, label: `${hex(l.level)} ${t27.subRequestSeed(l.level)}` },
             { id: l.level + 1, label: `${hex(l.level + 1)} ${t27.subSendKey(l.level)}` },
           ])
-        : form.subFunctions,
+        : form.dtcRead
+          ? DTC_REPORT_TYPES
+          : form.subFunctions,
     [form, config.security.levels],
   );
   const writableFirst = useMemo(() => [...config.dids].sort((a, b) => Number(b.writable) - Number(a.writable)), [config.dids]);
@@ -78,6 +122,10 @@ export function RequestBuilder({ sid, form, config, onSend, lastSeed }: RequestB
   const [addressing, setAddressing] = useState<Addressing>('physical');
   const [hexText, setHexText] = useState('');
   const [withPci, setWithPci] = useState(false);
+  const [statusMask, setStatusMask] = useState(0x0d);
+  const [dtcId, setDtcId] = useState(catalog.find((c) => c.ecu === 'engine')?.id ?? '');
+  const [recordText, setRecordText] = useState('FF');
+  const dtcEntry = catalog.find((c) => c.id === dtcId);
 
   const writeDef = config.dids.find((d) => d.did === writeDid);
   const levelCfg = typeof sub === 'number' ? config.security.levels.find((l) => l.level === sub - 1) : undefined;
@@ -108,10 +156,16 @@ export function RequestBuilder({ sid, form, config, onSend, lastSeed }: RequestB
         if (key === null) return { pdu: null, error: p.hexInvalid };
         pdu.push(...key);
       }
+      if (form.dtcRead && (sub === 0x01 || sub === 0x02)) pdu.push(statusMask);
+      if (form.dtcRead && (sub === 0x04 || sub === 0x06)) {
+        const rec = parseHexBytes(recordText);
+        if (!dtcEntry || rec?.length !== 1) return { pdu: null, error: p.hexInvalid };
+        pdu.push((dtcEntry.dtc >> 16) & 0xff, (dtcEntry.dtc >> 8) & 0xff, dtcEntry.dtc & 0xff, rec[0]!);
+      }
       return { pdu, error: null };
     }
     return { pdu: [sid], error: null };
-  }, [form, dids, sid, sub, customSub, suppress, subOptions, isSendKey, keyText, writeDef, writeDid, writeText]);
+  }, [form, dids, sid, sub, customSub, suppress, subOptions, isSendKey, keyText, writeDef, writeDid, writeText, statusMask, dtcEntry, recordText]);
 
   const seedForKey = isSendKey && lastSeed && lastSeed.level === (sub as number) - 1 ? lastSeed : null;
   const fillKey = () => {
@@ -222,6 +276,26 @@ export function RequestBuilder({ sid, form, config, onSend, lastSeed }: RequestB
                 <input value={writeText} onChange={(e) => setWriteText(e.target.value)} className={cn(inputCls, 'w-full', writeDef?.format !== 'ascii' && 'uppercase')} />
               </label>
               {writeDef && <p className="text-xs text-muted">{p.writeDataHint(writeDef.length, vi.config.dids.formats[writeDef.format])}</p>}
+            </div>
+          )}
+          {form.dtcRead && (sub === 0x01 || sub === 0x02) && <StatusMaskPicker value={statusMask} onChange={setStatusMask} />}
+          {form.dtcRead && (sub === 0x04 || sub === 0x06) && (
+            <div className="grid gap-2 sm:grid-cols-[1fr_8rem]">
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-muted">{p.dtcLabel}</span>
+                <select value={dtcId} onChange={(e) => setDtcId(e.target.value)} className={cn(inputCls, 'w-full font-sans')}>
+                  {catalog.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {formatDtc(c.dtc)} – {vi.dtc.components[c.component]} – {vi.dtc.faultTypes[c.faultType]} ({vi.dtc.ecus[c.ecu]})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-muted">{p.recordLabel}</span>
+                <input value={recordText} onChange={(e) => setRecordText(e.target.value)} maxLength={4} className={cn(inputCls, 'w-full uppercase')} />
+              </label>
+              <p className="text-xs text-muted sm:col-span-2">{sub === 0x04 ? p.snapshotRecordHint : p.extRecordHint}</p>
             </div>
           )}
           {form.allowSuppress && <Switch checked={suppress} onCheckedChange={setSuppress} label={p.suppress} hint={p.suppressHint} />}
