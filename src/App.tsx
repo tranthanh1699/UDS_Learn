@@ -2,6 +2,7 @@ import { HashRouter, Route, Routes } from 'react-router-dom';
 import { vi } from '@/i18n/vi';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { TooltipProvider } from '@/components/ui/Tooltip';
+import { ConfigPage } from '@/pages/ConfigPage';
 import { HomePage } from '@/pages/HomePage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { PlaceholderPage } from '@/pages/PlaceholderPage';
@@ -17,7 +18,7 @@ export function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<HomePage />} />
-            <Route path="config" element={<PlaceholderPage title={pg.config.title} subtitle={pg.config.subtitle} phase={5} />} />
+            <Route path="config" element={<ConfigPage />} />
             <Route path="service/:sid" element={<ServicePage />} />
             <Route path="faults" element={<PlaceholderPage title={pg.faults.title} subtitle={pg.faults.subtitle} phase={7} />} />
             <Route path="trace" element={<PlaceholderPage title={pg.trace.title} subtitle={pg.trace.subtitle} phase={8} />} />

@@ -61,11 +61,35 @@ export interface TimingConfig {
   s3Ms: number;
 }
 
+/** Thuật toán tính key từ seed: XOR hằng số, cộng hằng số, hoặc biểu thức tùy chỉnh theo biến `seed`. */
+export type KeyAlgorithm = 'xor' | 'add' | 'expression';
+
+export interface SecurityLevelConfig {
+  /** Security level = sub-function requestSeed (lẻ): 1 ↔ 0x27 01/02, 3 ↔ 0x27 03/04. */
+  level: number;
+  /** Số byte của seed và key (1–4). */
+  seedLength: number;
+  algorithm: KeyAlgorithm;
+  /** Hằng số dùng cho xor/add. */
+  constant: number;
+  /** Biểu thức dùng khi algorithm = expression, ví dụ "(seed ^ 0x5A5A) + 0x1234". */
+  expression: string;
+  /** Số lần gửi key sai tối đa; lần sai thứ maxAttempts → NRC 0x36. */
+  maxAttempts: number;
+  /** Thời gian khóa sau khi vượt số lần thử (ms); trong thời gian này → NRC 0x37. */
+  delayMs: number;
+}
+
+export interface SecurityConfig {
+  levels: SecurityLevelConfig[];
+}
+
 export interface VehicleConfig {
   schemaVersion: 1;
   ecuName: string;
   can: CanConfig;
   timing: TimingConfig;
+  security: SecurityConfig;
   dids: DidDefinition[];
   conditions: VehicleConditions;
   limits: {

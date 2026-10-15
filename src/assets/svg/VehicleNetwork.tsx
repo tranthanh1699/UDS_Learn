@@ -44,6 +44,8 @@ interface Props {
   session: SessionKind;
   unlockedLevel: number | null;
   rebooting: boolean;
+  /** Tên ECU đích (từ cấu hình); mặc định là "Engine ECU". */
+  ecuName?: string;
 }
 
 function EcuBox({ at, label, active }: { at: Pt; label: string; active?: boolean }) {
@@ -66,7 +68,7 @@ function EcuBox({ at, label, active }: { at: Pt; label: string; active?: boolean
 }
 
 /** Hình minh họa gốc: xe nhìn từ trên xuống với các ECU, CAN bus, cổng OBD-II và laptop tester. */
-export function VehicleNetwork({ packet, session, unlockedLevel, rebooting }: Props) {
+export function VehicleNetwork({ packet, session, unlockedLevel, rebooting, ecuName }: Props) {
   const c = vi.car;
   const hasResponse = packet !== null && (packet.outcome === 'positive' || packet.outcome === 'negative');
   const [ex, ey] = NODES.engine;
@@ -122,7 +124,7 @@ export function VehicleNetwork({ packet, session, unlockedLevel, rebooting }: Pr
       </text>
 
       <EcuBox at={NODES.gateway} label={c.gateway} />
-      <EcuBox at={NODES.engine} label={c.engine} active />
+      <EcuBox at={NODES.engine} label={ecuName ? (ecuName.length > 13 ? ecuName.slice(0, 12) + '…' : ecuName) : c.engine} active />
       <EcuBox at={NODES.abs} label={c.abs} />
       <EcuBox at={NODES.body} label={c.body} />
 

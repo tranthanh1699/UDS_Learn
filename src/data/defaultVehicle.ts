@@ -32,6 +32,28 @@ export const DEFAULT_VEHICLE: VehicleConfig = {
     stMin: 0,
   },
   timing: { p2Ms: 50, p2StarMs: 5000, s3Ms: 5000 },
+  security: {
+    levels: [
+      {
+        level: 1,
+        seedLength: 4,
+        algorithm: 'xor',
+        constant: 0x5a5a5a5a,
+        expression: '(seed ^ 0x5A5A5A5A) + 0x1234',
+        maxAttempts: 3,
+        delayMs: 10000,
+      },
+      {
+        level: 3,
+        seedLength: 4,
+        algorithm: 'add',
+        constant: 0x12345678,
+        expression: '((seed << 3) | (seed >> 29)) ^ 0xA5A5A5A5',
+        maxAttempts: 3,
+        delayMs: 10000,
+      },
+    ],
+  },
   conditions: { speedKmh: 0, rpm: 0, engineRunning: false, batteryVoltage: 12.6, gear: 'P' },
   limits: { maxDidsPerRead: 8, maxResponseLength: 4095 },
   dids: [
