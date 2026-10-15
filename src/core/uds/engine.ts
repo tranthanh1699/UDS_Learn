@@ -10,8 +10,24 @@ import type { Effect, EcuState, RequestContext, ServiceDefinition, StateChange, 
 const o = vi.uds.outcome;
 const sc = vi.uds.stateChange;
 
+/** Thời gian ECU khởi động lại sau 0x11 (ms); trong thời gian này ECU không trả lời. */
+export const REBOOT_MS = 1500;
+
 export function initialEcuState(): EcuState {
-  return { session: 'default', unlockedLevel: null, s3Deadline: null, didValues: {} };
+  return {
+    session: 'default',
+    unlockedLevel: null,
+    s3Deadline: null,
+    didValues: {},
+    security: { pendingSeed: null, failedAttempts: {}, delayUntil: {} },
+    rebootUntil: null,
+  };
+}
+
+export interface UdsServerOptions {
+  services?: readonly ServiceDefinition[];
+  /** Nguồn số ngẫu nhiên [0, 1) để sinh seed; mặc định Math.random. */
+  random?: () => number;
 }
 
 /**
@@ -21,12 +37,14 @@ export function initialEcuState(): EcuState {
 export class UdsServer {
   private state: EcuState = initialEcuState();
   private readonly services: Map<number, ServiceDefinition>;
+  private readonly random: () => number;
 
   constructor(
     private config: VehicleConfig,
-    services: readonly ServiceDefinition[] = DEFAULT_SERVICES,
+    options: UdsServerOptions = {},
   ) {
-    this.services = new Map(services.map((s) => [s.sid, s]));
+    this.services = new Map((options.services ?? DEFAULT_SERVICES).map((s) => [s.sid, s]));
+    this.random = options.random ?? Math.random;
   }
 
   getState(): Readonly<EcuState> {
@@ -50,16 +68,18 @@ export class UdsServer {
     this.state = { ...this.state, ...patch };
   }
 
-  /** Kiểm tra S3: nếu hết hạn thì quay về default session và khóa security. */
+  /** Xử lý các sự kiện theo thời gian: khởi động lại xong, S3 hết hạn. */
   tick(now: number): StateChange[] {
-    if (!isS3Expired(this.state.s3Deadline, now)) return [];
-    const changes: StateChange[] = [
-      { kind: 'session', from: this.state.session, to: 'default', message: sc.s3Timeout(this.config.timing.s3Ms) },
-    ];
-    if (this.state.unlockedLevel !== null) {
-      changes.push({ kind: 'security', from: this.state.unlockedLevel, to: null, message: sc.securityLocked });
+    const changes: StateChange[] = [];
+    if (this.state.rebootUntil !== null && now >= this.state.rebootUntil) {
+      this.state = { ...this.state, rebootUntil: null };
+      changes.push({ kind: 'reboot', phase: 'done', message: sc.rebootDone });
     }
-    this.state = { ...this.state, session: 'default', unlockedLevel: null, s3Deadline: null };
+    if (isS3Expired(this.state.s3Deadline, now)) {
+      changes.push({ kind: 'session', from: this.state.session, to: 'default', message: sc.s3Timeout(this.config.timing.s3Ms) });
+      this.state = { ...this.state, session: 'default', s3Deadline: null };
+      changes.push(...this.lockSecurity());
+    }
     return changes;
   }
 
@@ -72,21 +92,21 @@ export class UdsServer {
       notes: [] as string[],
       stateChanges,
     };
+    const silent = (explanation: string): UdsResult => ({
+      ...base,
+      sid: request[0] ?? null,
+      serviceName: null,
+      subFunction: null,
+      suppressPosRsp: false,
+      steps: [],
+      outcome: 'noResponse',
+      response: null,
+      nrc: null,
+      explanation,
+    });
 
-    if (request.length === 0) {
-      return {
-        ...base,
-        sid: null,
-        serviceName: null,
-        subFunction: null,
-        suppressPosRsp: false,
-        steps: [],
-        outcome: 'noResponse',
-        response: null,
-        nrc: null,
-        explanation: o.emptyRequest,
-      };
-    }
+    if (request.length === 0) return silent(o.emptyRequest);
+    if (this.state.rebootUntil !== null) return silent(o.rebooting);
 
     const sid = request[0]!;
     const def = this.services.get(sid);
@@ -97,13 +117,14 @@ export class UdsServer {
       conditions: ctx.conditions,
       config: this.config,
       state: this.state,
+      randomBytes: (n) => Array.from({ length: n }, () => Math.floor(this.random() * 256) & 0xff),
     });
 
     const hasSub = def?.subFunctions !== undefined && request.length >= 2;
     const subFunction = hasSub ? request[1]! & 0x7f : null;
     const suppressPosRsp = hasSub && (request[1]! & 0x80) !== 0;
 
-    stateChanges.push(...this.applyEffects(result.effects ?? []));
+    stateChanges.push(...this.applyEffects(result.effects ?? [], ctx.now));
 
     let outcome: UdsResult['outcome'];
     let response: number[] | null;
@@ -163,8 +184,12 @@ export class UdsServer {
     };
   }
 
-  private applyEffects(effects: readonly Effect[]): StateChange[] {
+  private applyEffects(effects: readonly Effect[], now: number): StateChange[] {
     const changes: StateChange[] = [];
+    const sec = () => this.state.security;
+    const setSec = (patch: Partial<EcuState['security']>) => {
+      this.state = { ...this.state, security: { ...this.state.security, ...patch } };
+    };
     for (const effect of effects) {
       switch (effect.type) {
         case 'setSession': {
@@ -172,7 +197,7 @@ export class UdsServer {
           if (from === effect.to) break;
           changes.push({ kind: 'session', from, to: effect.to, message: sc.session(vi.session[from], vi.session[effect.to]) });
           this.state = { ...this.state, session: effect.to };
-          // Đổi session thì security bị khóa lại
+          // Đổi session thì security bị khóa lại và seed đang chờ không còn giá trị
           changes.push(...this.lockSecurity());
           break;
         }
@@ -188,6 +213,42 @@ export class UdsServer {
             message: sc.didWritten(hex(effect.did, 4), hexBytes(effect.data)),
           });
           break;
+        case 'storeSeed':
+          setSec({ pendingSeed: { level: effect.level, seed: [...effect.seed] } });
+          break;
+        case 'unlock': {
+          const from = this.state.unlockedLevel;
+          this.state = { ...this.state, unlockedLevel: effect.level };
+          setSec({ pendingSeed: null, failedAttempts: { ...sec().failedAttempts, [effect.level]: 0 } });
+          changes.push({ kind: 'security', from, to: effect.level, message: sc.unlocked(effect.level) });
+          break;
+        }
+        case 'keyFailed': {
+          const cfg = this.config.security.levels.find((l) => l.level === effect.level);
+          const max = cfg?.maxAttempts ?? 3;
+          const attempts = (sec().failedAttempts[effect.level] ?? 0) + 1;
+          if (attempts >= max) {
+            const delay = cfg?.delayMs ?? 10000;
+            setSec({
+              pendingSeed: null,
+              failedAttempts: { ...sec().failedAttempts, [effect.level]: 0 },
+              delayUntil: { ...sec().delayUntil, [effect.level]: now + delay },
+            });
+            changes.push({ kind: 'securityAttempt', level: effect.level, attempts, max, message: sc.delayStarted(effect.level, delay) });
+          } else {
+            setSec({ pendingSeed: null, failedAttempts: { ...sec().failedAttempts, [effect.level]: attempts } });
+            changes.push({ kind: 'securityAttempt', level: effect.level, attempts, max, message: sc.keyFailed(attempts, max) });
+          }
+          break;
+        }
+        case 'ecuReset': {
+          const from = this.state.session;
+          changes.push(...this.lockSecurity());
+          this.state = { ...this.state, session: 'default', s3Deadline: null, rebootUntil: now + REBOOT_MS };
+          if (from !== 'default') changes.push({ kind: 'session', from, to: 'default', message: sc.session(vi.session[from], vi.session.default) });
+          changes.push({ kind: 'reboot', phase: 'start', message: sc.rebootStart(REBOOT_MS) });
+          break;
+        }
       }
     }
     return changes;
@@ -195,8 +256,7 @@ export class UdsServer {
 
   private lockSecurity(): StateChange[] {
     const from = this.state.unlockedLevel;
-    if (from === null) return [];
-    this.state = { ...this.state, unlockedLevel: null };
-    return [{ kind: 'security', from, to: null, message: sc.securityLocked }];
+    this.state = { ...this.state, unlockedLevel: null, security: { ...this.state.security, pendingSeed: null } };
+    return from === null ? [] : [{ kind: 'security', from, to: null, message: sc.securityLocked }];
   }
 }

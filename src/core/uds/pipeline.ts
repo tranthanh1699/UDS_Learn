@@ -3,14 +3,15 @@ import { hex } from '../util/hex';
 import type { SessionKind } from '../vehicle/types';
 import { NRC } from './nrc';
 import { isLevelUnlocked } from './security';
-import type {
-  CheckResult,
-  HandlerResult,
-  PipelineStep,
-  ServiceContext,
-  ServiceDefinition,
-  StepId,
-  StepStatus,
+import {
+  resolveSubFunctions,
+  type CheckResult,
+  type HandlerResult,
+  type PipelineStep,
+  type ServiceContext,
+  type ServiceDefinition,
+  type StepId,
+  type StepStatus,
 } from './types';
 
 const r = vi.uds.reasons;
@@ -42,7 +43,7 @@ export function runPipeline(def: ServiceDefinition | undefined, input: PipelineI
   const rawSub = hasSub && request.length >= 2 ? request[1]! : null;
   const subFunction = rawSub === null ? null : rawSub & 0x7f;
   const suppressPosRsp = rawSub !== null && (rawSub & 0x80) !== 0;
-  const subDef = subFunction === null ? undefined : def?.subFunctions?.find((s) => s.id === subFunction);
+  const subDef = subFunction === null ? undefined : resolveSubFunctions(def, input.config).find((s) => s.id === subFunction);
 
   const steps: PipelineStep[] = [];
   const ctx: ServiceContext = {

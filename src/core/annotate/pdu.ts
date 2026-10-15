@@ -2,6 +2,8 @@ import { vi } from '../../i18n/vi';
 import { NEGATIVE_RESPONSE_SID, nrcName } from '../uds/nrc';
 import { NRC_ISO_REF, SERVICE_ISO_REFS, serviceName } from '../uds/serviceNames';
 import { DEFAULT_SERVICES } from '../uds/services';
+import { levelOfSubFunction } from '../uds/services/0x27';
+import { resolveSubFunctions } from '../uds/types';
 import { hex, hexBytes } from '../util/hex';
 import type { DidDefinition, VehicleConfig } from '../vehicle/types';
 import type { BitInfo, PduField } from './types';
@@ -17,8 +19,8 @@ export interface PduContext {
 
 const bin = (n: number, width: number) => n.toString(2).padStart(width, '0');
 
-function subFunctionName(sid: number, sub: number): string | undefined {
-  return DEFAULT_SERVICES.find((s) => s.sid === sid)?.subFunctions?.find((s) => s.id === sub)?.name;
+function subFunctionName(sid: number, sub: number, config: VehicleConfig): string | undefined {
+  return resolveSubFunctions(DEFAULT_SERVICES.find((s) => s.sid === sid), config).find((s) => s.id === sub)?.name;
 }
 
 function hasSubFunction(sid: number): boolean {
@@ -72,9 +74,9 @@ function sidField(pdu: readonly number[], ctx: PduContext): PduField {
   };
 }
 
-function subFunctionField(sid: number, raw: number, echo: boolean): PduField {
+function subFunctionField(sid: number, raw: number, echo: boolean, config: VehicleConfig): PduField {
   const sub = raw & 0x7f;
-  const name = subFunctionName(sid, sub);
+  const name = subFunctionName(sid, sub, config);
   const bits: BitInfo[] = [];
   if (!echo) {
     bits.push({
@@ -101,7 +103,7 @@ function subFunctionField(sid: number, raw: number, echo: boolean): PduField {
   };
 }
 
-function didField(start: number, did: number, config: VehicleConfig, id: string): { field: PduField; def?: DidDefinition } {
+function didField(start: number, did: number, config: VehicleConfig, id: string, sid = 0x22): { field: PduField; def?: DidDefinition } {
   const def = config.dids.find((d) => d.did === did);
   return {
     def,
@@ -112,7 +114,7 @@ function didField(start: number, did: number, config: VehicleConfig, id: string)
       fieldId: id,
       field: f.did,
       meaning: def ? m.did(hex(did, 4), def.name) : m.unknownDid(hex(did, 4)),
-      isoRef: SERVICE_ISO_REFS[0x22],
+      isoRef: SERVICE_ISO_REFS[sid],
     },
   };
 }
@@ -168,7 +170,7 @@ export function annotatePdu(pdu: readonly number[], ctx: PduContext): PduField[]
   const reqSid = ctx.direction === 'request' ? sid : sid - 0x40;
   let pos = 1;
   if (hasSubFunction(reqSid) && pdu.length > 1) {
-    fields.push(subFunctionField(reqSid, pdu[1]!, ctx.direction === 'response'));
+    fields.push(subFunctionField(reqSid, pdu[1]!, ctx.direction === 'response', ctx.config));
     pos = 2;
   }
 
@@ -214,7 +216,49 @@ export function annotatePdu(pdu: readonly number[], ctx: PduContext): PduField[]
     return [...fields, ...rest(pdu, pos)];
   }
 
-  const extra = (reqSid === 0x10 || reqSid === 0x3e) && ctx.direction === 'request';
+  // 0x27: seed trong response requestSeed, key trong request sendKey
+  if (reqSid === 0x27 && pos === 2 && pdu.length > 2) {
+    const sub = pdu[1]! & 0x7f;
+    const level = levelOfSubFunction(sub);
+    const isSeedResponse = ctx.direction === 'response' && sub % 2 === 1;
+    const isKeyRequest = ctx.direction === 'request' && sub % 2 === 0;
+    if (isSeedResponse || isKeyRequest) {
+      const value = pdu.slice(2);
+      fields.push({
+        start: 2,
+        length: value.length,
+        kind: 'data',
+        fieldId: isSeedResponse ? 'seed' : 'key',
+        field: isSeedResponse ? f.seed : f.key,
+        meaning: isSeedResponse ? (value.every((x) => x === 0) ? m.seedZero(level) : m.seed(level)) : m.key(level),
+        isoRef: SERVICE_ISO_REFS[0x27],
+      });
+      return fields;
+    }
+  }
+
+  // 0x2E: request 2E DID data..., response 6E DID
+  if (reqSid === 0x2e && pdu.length >= 3) {
+    const { field, def } = didField(1, (pdu[1]! << 8) | pdu[2]!, ctx.config, 'did', 0x2e);
+    fields.push(field);
+    if (ctx.direction === 'response') return [...fields, ...rest(pdu, 3, 'extra')];
+    if (pdu.length > 3) {
+      const data = pdu.slice(3);
+      fields.push({
+        start: 3,
+        length: data.length,
+        kind: 'data',
+        fieldId: 'writeData',
+        field: f.writeData,
+        meaning: def ? m.writeData(def.name, decodeDidValue(def, data)) : m.data,
+        byteNotes: def?.format === 'ascii' ? data.map((c) => m.asciiChar(String.fromCharCode(c))) : undefined,
+        isoRef: SERVICE_ISO_REFS[0x2e],
+      });
+    }
+    return fields;
+  }
+
+  const extra = (reqSid === 0x10 || reqSid === 0x3e || reqSid === 0x11) && (ctx.direction === 'request' || reqSid === 0x11);
   return [...fields, ...rest(pdu, pos, extra ? 'extra' : 'data')];
 }
 

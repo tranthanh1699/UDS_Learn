@@ -7,8 +7,21 @@ export interface EcuState {
   unlockedLevel: number | null;
   /** Thời điểm S3 hết hạn (ms); null khi ở default session. */
   s3Deadline: number | null;
-  /** Giá trị DID static đã bị ghi (0x2E); DID chưa ghi dùng giá trị trong cấu hình. */
+  /** Giá trị DID static đã bị ghi (0x2E); DID chưa ghi dùng giá trị trong cấu hình. Giữ nguyên qua ECU reset (giả lập NVM). */
   didValues: Record<number, number[]>;
+  security: SecurityRuntime;
+  /** ECU đang khởi động lại sau 0x11 cho tới thời điểm này (ms); null = đang chạy bình thường. */
+  rebootUntil: number | null;
+}
+
+/** Trạng thái nội bộ của SecurityAccess. */
+export interface SecurityRuntime {
+  /** Seed đã gửi cho tester và đang chờ sendKey. */
+  pendingSeed: { level: number; seed: number[] } | null;
+  /** Số lần gửi key sai liên tiếp theo từng level. */
+  failedAttempts: Record<number, number>;
+  /** Thời điểm hết thời gian khóa (ms) theo từng level. */
+  delayUntil: Record<number, number>;
 }
 
 export interface RequestContext {
@@ -48,13 +61,20 @@ export interface PipelineStep {
 export type StateChange =
   | { kind: 'session'; from: SessionKind; to: SessionKind; message: string }
   | { kind: 'security'; from: number | null; to: number | null; message: string }
-  | { kind: 'didWritten'; did: number; data: number[]; message: string };
+  | { kind: 'didWritten'; did: number; data: number[]; message: string }
+  | { kind: 'securityAttempt'; level: number; attempts: number; max: number; message: string }
+  | { kind: 'reboot'; phase: 'start' | 'done'; message: string };
 
 /** Hiệu ứng mà handler yêu cầu engine áp dụng; handler không tự sửa state. */
 export type Effect =
   | { type: 'setSession'; to: SessionKind }
   | { type: 'lockSecurity' }
-  | { type: 'writeDid'; did: number; data: number[] };
+  | { type: 'writeDid'; did: number; data: number[] }
+  | { type: 'storeSeed'; level: number; seed: number[] }
+  | { type: 'unlock'; level: number }
+  /** Key sai: engine tăng bộ đếm, xóa seed, và bắt đầu thời gian khóa khi đạt số lần tối đa. */
+  | { type: 'keyFailed'; level: number }
+  | { type: 'ecuReset'; resetType: number };
 
 export type UdsOutcome =
   /** Gửi positive response. */
@@ -105,6 +125,8 @@ export interface ServiceContext {
   conditions: VehicleConditions;
   config: VehicleConfig;
   state: Readonly<EcuState>;
+  /** Sinh n byte ngẫu nhiên (engine có thể thay bằng nguồn tất định khi test). */
+  randomBytes(n: number): number[];
   /** Ghi nhận một kiểm tra riêng của service đã đạt. */
   pass(title: string, reason: string): void;
   /** Ghi nhận một kiểm tra riêng thất bại và trả về kết quả negative tương ứng. */
@@ -131,10 +153,20 @@ export interface ServiceDefinition {
   sessions: readonly SessionKind[];
   /** Security level cần cho cả service; null = không cần. */
   securityLevel: number | null;
-  /** Danh sách sub-function; không có = service không dùng sub-function. */
-  subFunctions?: readonly SubFunctionDefinition[];
+  /**
+   * Danh sách sub-function; không có = service không dùng sub-function.
+   * Có thể phụ thuộc cấu hình (ví dụ 0x27 sinh sub-function theo các security level đã cấu hình).
+   */
+  subFunctions?: readonly SubFunctionDefinition[] | ((config: VehicleConfig) => readonly SubFunctionDefinition[]);
   /** Bước 8: kiểm tra thứ tự request (ví dụ sendKey trước requestSeed). */
   checkSequence?(ctx: ServiceContext): CheckResult;
   /** Bước 9: kiểm tra riêng và thực thi. */
   handle(ctx: ServiceContext): HandlerResult;
+}
+
+/** Danh sách sub-function thực tế của service theo cấu hình hiện tại. */
+export function resolveSubFunctions(def: ServiceDefinition | undefined, config: VehicleConfig): readonly SubFunctionDefinition[] {
+  const subs = def?.subFunctions;
+  if (subs === undefined) return [];
+  return typeof subs === 'function' ? subs(config) : subs;
 }

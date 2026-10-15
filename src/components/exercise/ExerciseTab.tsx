@@ -25,7 +25,7 @@ interface Task {
 function randomTask(content: ServiceLearnContent, config: VehicleConfig): Task {
   const pick = <T,>(arr: readonly T[]) => arr[Math.floor(Math.random() * arr.length)]!;
   const example = pick(content.exercises);
-  const exchange = runExample(config, example);
+  const exchange = runExample(config, example, Math.floor(Math.random() * 0xffffffff));
   return { frame: pick(exchange.frames), request: exchange.result.request };
 }
 

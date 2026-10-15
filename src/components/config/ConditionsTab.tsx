@@ -1,4 +1,4 @@
-import { Gauge as GaugeIcon, SlidersHorizontal } from 'lucide-react';
+import { Gauge as GaugeIcon, Power, SlidersHorizontal } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Dashboard } from '@/assets/svg/Dashboard';
 import type { Gear } from '@/core/vehicle/types';
@@ -72,12 +72,40 @@ export function ConditionsTab() {
           <p className="text-xs text-muted">{t.hint}</p>
         </CardBody>
       </Card>
-      <Card className="xl:col-span-3">
-        <CardHeader title={t.dashboard} icon={<GaugeIcon className="h-4 w-4" />} />
-        <CardBody>
-          <LiveDashboard />
-        </CardBody>
-      </Card>
+      <div className="space-y-4 xl:col-span-3">
+        <Card>
+          <CardHeader title={t.dashboard} icon={<GaugeIcon className="h-4 w-4" />} />
+          <CardBody>
+            <LiveDashboard />
+          </CardBody>
+        </Card>
+        <EcuResetSettings />
+      </div>
     </div>
+  );
+}
+
+function EcuResetSettings() {
+  const r = useVehicleConfigStore((s) => s.draft.ecuReset);
+  const update = useVehicleConfigStore((s) => s.update);
+  const e = vi.config.ecuReset;
+  return (
+    <Card>
+      <CardHeader title={e.title} icon={<Power className="h-4 w-4" />} />
+      <CardBody className="space-y-3">
+        <Switch
+          checked={r.requireStandstill}
+          onCheckedChange={(v) => update((d) => void (d.ecuReset.requireStandstill = v))}
+          label={e.requireStandstill}
+          hint={e.requireStandstillHint}
+        />
+        <Switch
+          checked={r.requireEngineOff}
+          onCheckedChange={(v) => update((d) => void (d.ecuReset.requireEngineOff = v))}
+          label={e.requireEngineOff}
+          hint={e.requireEngineOffHint}
+        />
+      </CardBody>
+    </Card>
   );
 }

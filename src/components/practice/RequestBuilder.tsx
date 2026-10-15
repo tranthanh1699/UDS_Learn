@@ -1,12 +1,13 @@
-import { Plus, Send, X } from 'lucide-react';
+import { KeyRound, Plus, Send, X } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { annotatePdu, annotatePduBytes } from '@/core/annotate';
 import { formatCanId } from '@/core/can/frame';
 import { maxSingleFramePayload } from '@/core/isotp/config';
 import { decodePci } from '@/core/isotp/pci';
 import { previewRequestFrames } from '@/core/trace/exchange';
-import { hex, parseHexBytes } from '@/core/util/hex';
-import type { Addressing, VehicleConfig } from '@/core/vehicle/types';
+import { computeKey } from '@/core/uds/keyAlgorithm';
+import { hex, hexBytes, parseHexBytes } from '@/core/util/hex';
+import type { Addressing, DidDefinition, VehicleConfig } from '@/core/vehicle/types';
 import type { ServiceFormSpec } from '@/data/services-meta';
 import { vi } from '@/i18n/vi';
 import { cn } from '@/lib/cn';
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { Switch } from '@/components/ui/Switch';
 
 const p = vi.practice;
+const t27 = vi.uds.service27;
 const inputCls = 'hex h-9 rounded-md border border-border bg-bg px-2.5 text-sm outline-none focus:border-accent';
 
 interface Built {
@@ -36,23 +38,63 @@ function useHexRequest(text: string, withPci: boolean, fd: boolean): Built {
   }, [text, withPci, fd]);
 }
 
-export function RequestBuilder({ sid, form, config, onSend }: { sid: number; form: ServiceFormSpec; config: VehicleConfig; onSend: (pdu: number[], addressing: Addressing) => void }) {
+const dataText = (def: DidDefinition | undefined) =>
+  !def ? '' : def.format === 'ascii' ? String.fromCharCode(...def.data) : def.data.map((b) => hex(b)).join(' ');
+
+const parseAscii = (text: string): number[] | null =>
+  [...text].every((c) => c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) < 0x7f) ? [...text].map((c) => c.charCodeAt(0)) : null;
+
+interface RequestBuilderProps {
+  sid: number;
+  form: ServiceFormSpec;
+  config: VehicleConfig;
+  onSend: (pdu: number[], addressing: Addressing) => void;
+  /** Seed tester vừa nhận (0x27), dùng cho nút tính key. */
+  lastSeed?: { level: number; seed: number[] } | null;
+}
+
+export function RequestBuilder({ sid, form, config, onSend, lastSeed }: RequestBuilderProps) {
+  const subOptions = useMemo(
+    () =>
+      form.securityLevels
+        ? config.security.levels.flatMap((l) => [
+            { id: l.level, label: `${hex(l.level)} ${t27.subRequestSeed(l.level)}` },
+            { id: l.level + 1, label: `${hex(l.level + 1)} ${t27.subSendKey(l.level)}` },
+          ])
+        : form.subFunctions,
+    [form, config.security.levels],
+  );
+  const writableFirst = useMemo(() => [...config.dids].sort((a, b) => Number(b.writable) - Number(a.writable)), [config.dids]);
+
   const [mode, setMode] = useState<'form' | 'hex'>('form');
-  const [sub, setSub] = useState<number | 'custom'>(form.subFunctions?.[0]?.id ?? 0);
+  const [sub, setSub] = useState<number | 'custom'>(subOptions?.[0]?.id ?? 0);
   const [customSub, setCustomSub] = useState('04');
   const [suppress, setSuppress] = useState(false);
   const [dids, setDids] = useState<number[]>(form.defaultDids ?? []);
   const [customDid, setCustomDid] = useState('');
+  const [keyText, setKeyText] = useState('');
+  const [writeDid, setWriteDid] = useState<number>(writableFirst[0]?.did ?? 0);
+  const [writeText, setWriteText] = useState(() => dataText(writableFirst[0]));
   const [addressing, setAddressing] = useState<Addressing>('physical');
   const [hexText, setHexText] = useState('');
   const [withPci, setWithPci] = useState(false);
 
+  const writeDef = config.dids.find((d) => d.did === writeDid);
+  const levelCfg = typeof sub === 'number' ? config.security.levels.find((l) => l.level === sub - 1) : undefined;
+  const isSendKey = form.securityLevels === true && levelCfg !== undefined && typeof sub === 'number' && sub % 2 === 0;
+
   const formBuilt: Built = useMemo(() => {
+    if (form.writeDid) {
+      if (!writeDef) return { pdu: null, error: p.noDid };
+      const bytes = writeDef.format === 'ascii' ? parseAscii(writeText) : parseHexBytes(writeText);
+      if (!bytes) return { pdu: null, error: p.hexInvalid };
+      return { pdu: [sid, writeDid >> 8, writeDid & 0xff, ...bytes], error: null };
+    }
     if (form.didPicker) {
       if (dids.length === 0) return { pdu: null, error: p.noDid };
       return { pdu: [sid, ...dids.flatMap((d) => [d >> 8, d & 0xff])], error: null };
     }
-    if (form.subFunctions) {
+    if (subOptions) {
       // Giá trị tự nhập được giữ nguyên byte (kể cả bit 7); công tắc suppress chỉ bật thêm bit 7
       let value = sub === 'custom' ? 0 : sub;
       if (sub === 'custom') {
@@ -60,10 +102,23 @@ export function RequestBuilder({ sid, form, config, onSend }: { sid: number; for
         if (bytes?.length !== 1) return { pdu: null, error: p.hexInvalid };
         value = bytes[0]!;
       }
-      return { pdu: [sid, value | (suppress ? 0x80 : 0)], error: null };
+      const pdu = [sid, value | (suppress ? 0x80 : 0)];
+      if (isSendKey) {
+        const key = parseHexBytes(keyText);
+        if (key === null) return { pdu: null, error: p.hexInvalid };
+        pdu.push(...key);
+      }
+      return { pdu, error: null };
     }
     return { pdu: [sid], error: null };
-  }, [form, dids, sid, sub, customSub, suppress]);
+  }, [form, dids, sid, sub, customSub, suppress, subOptions, isSendKey, keyText, writeDef, writeDid, writeText]);
+
+  const seedForKey = isSendKey && lastSeed && lastSeed.level === (sub as number) - 1 ? lastSeed : null;
+  const fillKey = () => {
+    if (!seedForKey || !levelCfg) return;
+    const r = computeKey(seedForKey.seed, levelCfg);
+    if (r.ok) setKeyText(hexBytes(r.key));
+  };
   const hexBuilt = useHexRequest(hexText, withPci, config.can.fd);
   const built = mode === 'form' ? formBuilt : hexBuilt;
 
@@ -108,7 +163,7 @@ export function RequestBuilder({ sid, form, config, onSend }: { sid: number; for
 
       {mode === 'form' ? (
         <div className="space-y-3">
-          {form.subFunctions && (
+          {subOptions && (
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-medium text-muted">{p.subFunction}</span>
               <div className="flex flex-wrap gap-2">
@@ -117,7 +172,7 @@ export function RequestBuilder({ sid, form, config, onSend }: { sid: number; for
                   onChange={(e) => setSub(e.target.value === 'custom' ? 'custom' : Number(e.target.value))}
                   className={cn(inputCls, 'font-sans')}
                 >
-                  {form.subFunctions.map((s) => (
+                  {subOptions.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.label}
                     </option>
@@ -129,6 +184,45 @@ export function RequestBuilder({ sid, form, config, onSend }: { sid: number; for
                 )}
               </div>
             </label>
+          )}
+          {isSendKey && (
+            <div className="space-y-1.5">
+              <span className="block text-xs font-medium text-muted">{p.key}</span>
+              <div className="flex flex-wrap gap-2">
+                <input aria-label={p.key} value={keyText} onChange={(e) => setKeyText(e.target.value)} placeholder="00 00 00 00" className={cn(inputCls, 'w-56 uppercase')} />
+                <Button size="sm" className="h-9" onClick={fillKey} disabled={!seedForKey}>
+                  <KeyRound className="h-3.5 w-3.5" /> {p.keyFromSeed}
+                </Button>
+              </div>
+              <p className="text-xs text-muted">{seedForKey ? p.keyLength(levelCfg!.seedLength) : p.noSeedYet}</p>
+            </div>
+          )}
+          {form.writeDid && (
+            <div className="space-y-2">
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-muted">{p.writeDidLabel}</span>
+                <select
+                  value={writeDid}
+                  onChange={(e) => {
+                    const did = Number(e.target.value);
+                    setWriteDid(did);
+                    setWriteText(dataText(config.dids.find((d) => d.did === did)));
+                  }}
+                  className={cn(inputCls, 'w-full font-sans')}
+                >
+                  {writableFirst.map((d) => (
+                    <option key={d.did} value={d.did}>
+                      {hex(d.did, 4)} {d.name} {d.writable ? '' : p.readOnlyTag}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-muted">{p.writeData}</span>
+                <input value={writeText} onChange={(e) => setWriteText(e.target.value)} className={cn(inputCls, 'w-full', writeDef?.format !== 'ascii' && 'uppercase')} />
+              </label>
+              {writeDef && <p className="text-xs text-muted">{p.writeDataHint(writeDef.length, vi.config.dids.formats[writeDef.format])}</p>}
+            </div>
           )}
           {form.allowSuppress && <Switch checked={suppress} onCheckedChange={setSuppress} label={p.suppress} hint={p.suppressHint} />}
           {form.didPicker && (

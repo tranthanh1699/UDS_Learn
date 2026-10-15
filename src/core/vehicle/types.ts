@@ -84,12 +84,21 @@ export interface SecurityConfig {
   levels: SecurityLevelConfig[];
 }
 
+/** Điều kiện ECU kiểm tra trước khi chấp nhận 0x11 ECUReset. */
+export interface EcuResetConfig {
+  /** Xe phải đứng yên, nếu không → NRC 0x88 vehicleSpeedTooHigh. */
+  requireStandstill: boolean;
+  /** Động cơ phải tắt, nếu không → NRC 0x83 engineIsRunning. */
+  requireEngineOff: boolean;
+}
+
 export interface VehicleConfig {
   schemaVersion: 1;
   ecuName: string;
   can: CanConfig;
   timing: TimingConfig;
   security: SecurityConfig;
+  ecuReset: EcuResetConfig;
   dids: DidDefinition[];
   conditions: VehicleConditions;
   limits: {

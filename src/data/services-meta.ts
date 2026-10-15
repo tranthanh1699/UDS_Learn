@@ -24,13 +24,22 @@ export interface ServiceExample {
   setup?: number[][];
   setupState?: Partial<EcuState>;
   conditions?: Partial<VehicleConditions>;
+  /**
+   * 0x27: tạo request sendKey từ seed nhận được trong bước chuẩn bị cuối cùng.
+   * 'correct' = key đúng, 'wrong' = key sai (đảo byte cuối).
+   */
+  sendKeyFromSetup?: 'correct' | 'wrong';
 }
 
 export interface ServiceFormSpec {
   subFunctions?: { id: number; label: string }[];
+  /** Sub-function sinh từ các security level đã cấu hình, kèm ô nhập key cho sendKey (0x27). */
+  securityLevels?: boolean;
   allowSuppress?: boolean;
   didPicker?: boolean;
   defaultDids?: number[];
+  /** Chọn một DID ghi được và nhập dữ liệu (0x2E). */
+  writeDid?: boolean;
 }
 
 export interface ServiceLearnContent {
@@ -302,8 +311,272 @@ const sid22: ServiceLearnContent = {
   ],
 };
 
+const VIN_NEW = [...'VNTEST0000ABC1234'].map((c) => c.charCodeAt(0));
+
+const sid27: ServiceLearnContent = {
+  sid: '27',
+  isoRef: 'ISO 14229-1, mục 10.4',
+  purpose:
+    'SecurityAccess bảo vệ các thao tác nhạy cảm như ghi dữ liệu, điều khiển chấp hành hay nạp phần mềm. ECU gửi một seed ngẫu nhiên; tester tính key bằng thuật toán bí mật mà chỉ tester và ECU biết rồi gửi lại. Key đúng thì ECU mở security level đó cho tới khi đổi session, S3 hết hạn hoặc ECU reset.',
+  useCases: [
+    'Trước khi ghi các DID được bảo vệ (VIN, cấu hình) bằng 0x2E.',
+    'Trước khi nạp phần mềm trong programming session (thường dùng một level riêng).',
+    'Mở các routine hoặc điều khiển I/O chỉ dành cho xưởng dịch vụ.',
+  ],
+  requestTable: [
+    { byte: '0', field: 'SID', size: '1 byte', value: '0x27', meaning: 'SecurityAccess' },
+    {
+      byte: '1',
+      field: 'Sub-function',
+      size: '1 byte',
+      value: '0x01 / 0x02 …',
+      meaning: 'Số lẻ = requestSeed của một level; số chẵn = sendKey của level đó (= requestSeed + 1). Bit 7 là suppressPosRspMsgIndicationBit.',
+    },
+    { byte: '2–…', field: 'Key', size: 'bằng độ dài seed', value: '…', meaning: 'Chỉ có trong sendKey: key tester tính từ seed vừa nhận.' },
+  ],
+  responseTable: [
+    { byte: '0', field: 'Response SID', size: '1 byte', value: '0x67', meaning: '0x27 + 0x40' },
+    { byte: '1', field: 'Sub-function', size: '1 byte', value: '0x01 / 0x02 …', meaning: 'ECU lặp lại sub-function của request.' },
+    {
+      byte: '2–…',
+      field: 'Seed',
+      size: '1–4 byte (cấu hình)',
+      value: '…',
+      meaning: 'Chỉ có trong response của requestSeed. Seed toàn 0 nghĩa là level này đã mở, không cần gửi key.',
+    },
+  ],
+  subFunctions: [
+    { value: '0x01', name: 'requestSeed (level 1)', meaning: 'Xin seed cho level 1.' },
+    { value: '0x02', name: 'sendKey (level 1)', meaning: 'Gửi key cho seed level 1 vừa nhận.' },
+    { value: '0x03', name: 'requestSeed (level 3)', meaning: 'Xin seed cho level 3 (thường là level cao hơn, ví dụ cho nạp phần mềm).' },
+    { value: '0x04', name: 'sendKey (level 3)', meaning: 'Gửi key cho seed level 3.' },
+    { value: '…', name: '', meaning: 'Các level khác tùy hãng. Simulator sinh danh sách sub-function theo trang Cấu hình xe › Security.' },
+  ],
+  nrcs: [
+    { nrc: 0x7f, trigger: 'Gửi 0x27 trong default session; simulator chỉ cho phép trong extended/programming session.' },
+    { nrc: 0x12, trigger: 'Sub-function của level chưa cấu hình, ví dụ 27 05.' },
+    { nrc: 0x13, trigger: 'requestSeed không đúng 2 byte, hoặc key không đúng độ dài seed.' },
+    { nrc: 0x24, trigger: 'sendKey khi chưa có seed nào đang chờ (chưa requestSeed, seed đã bị hủy sau key sai, hoặc seed của level khác).' },
+    { nrc: 0x35, trigger: 'Key không khớp với key ECU tính từ seed.' },
+    { nrc: 0x36, trigger: 'Key sai đến lần thứ "số lần thử tối đa" (mặc định 3); ECU bắt đầu thời gian khóa.' },
+    { nrc: 0x37, trigger: 'requestSeed trong thời gian khóa (mặc định 10 s sau NRC 0x36).' },
+  ],
+  examples: [
+    { title: 'Xin seed', description: 'Ở extended session, ECU trả 67 01 kèm seed 4 byte ngẫu nhiên và ghi nhớ seed này.', request: [0x27, 0x01], setup: [[0x10, 0x03]] },
+    {
+      title: 'Gửi key đúng',
+      description: 'Tester tính key từ seed vừa nhận theo thuật toán của level 1 (mặc định: seed XOR 0x5A5A5A5A). ECU so sánh và trả 67 02: level 1 đã mở.',
+      request: [],
+      setup: [
+        [0x10, 0x03],
+        [0x27, 0x01],
+      ],
+      sendKeyFromSetup: 'correct',
+    },
+    {
+      title: 'Gửi key sai',
+      description: 'Key không khớp nên ECU trả NRC 0x35, tăng bộ đếm số lần sai và hủy seed. Muốn thử lại phải requestSeed lần nữa.',
+      request: [],
+      setup: [
+        [0x10, 0x03],
+        [0x27, 0x01],
+      ],
+      sendKeyFromSetup: 'wrong',
+    },
+    {
+      title: 'sendKey khi chưa có seed',
+      description: 'Chưa gửi requestSeed nên ECU không có seed nào để so sánh: NRC 0x24 requestSequenceError.',
+      request: [0x27, 0x02, 0x00, 0x00, 0x00, 0x00],
+      setup: [[0x10, 0x03]],
+    },
+    {
+      title: 'Level đã mở',
+      description: 'Khi level 1 đã mở, requestSeed nhận seed toàn 0: tester hiểu là không cần gửi key nữa.',
+      request: [0x27, 0x01],
+      setup: [[0x10, 0x03]],
+      setupState: { unlockedLevel: 1 },
+    },
+  ],
+  mistakes: [
+    'Gửi lại key cũ sau NRC 0x35: seed đã bị hủy, phải requestSeed lại (nếu không sẽ nhận NRC 0x24).',
+    'Thử key liên tục: sau số lần cho phép ECU khóa level (0x36), mọi requestSeed trong thời gian chờ đều nhận 0x37.',
+    'Quên rằng đổi session, S3 hết hạn hay ECU reset đều làm mất trạng thái đã mở khóa.',
+    'Dùng thuật toán của level này để tính key cho level khác.',
+    'Gửi 0x27 trong default session: hầu hết ECU chỉ cho phép trong extended/programming session (NRC 0x7F).',
+  ],
+  autosar: {
+    intro: 'Dcm quản lý trạng thái security; phần tính seed và so sánh key do ứng dụng (SWC hoặc CDD) cung cấp qua callout.',
+    items: [
+      {
+        name: 'DcmDspSecurityRow',
+        desc: 'Mỗi security level một dòng: DcmDspSecurityLevel, DcmDspSecuritySeedSize, DcmDspSecurityKeySize, DcmDspSecurityNumAttDelay (số lần sai trước khi khóa), DcmDspSecurityDelayTime.',
+      },
+      { name: 'GetSeed / CompareKey', desc: 'Dcm gọi GetSeed để lấy seed và CompareKey để kiểm tra key; thuật toán bí mật nằm ở đây, không nằm trong Dcm.' },
+      { name: 'DcmDsdServiceSecurityLevelRef', desc: 'Khai báo service/sub-function cần level nào; chưa mở → Dcm tự trả NRC 0x33.' },
+      { name: 'DcmDspSecurityDelayTimeOnBoot', desc: 'Thời gian khóa ngay sau khi ECU khởi động, chống dò key bằng cách reset liên tục.' },
+    ],
+  },
+  form: { securityLevels: true, allowSuppress: true },
+  exercises: [
+    { title: '', description: '', request: [0x27, 0x01], setup: [[0x10, 0x03]] },
+    { title: '', description: '', request: [0x27, 0x03], setup: [[0x10, 0x03]] },
+    { title: '', description: '', request: [], setup: [[0x10, 0x03], [0x27, 0x01]], sendKeyFromSetup: 'correct' },
+    { title: '', description: '', request: [], setup: [[0x10, 0x03], [0x27, 0x01]], sendKeyFromSetup: 'wrong' },
+    { title: '', description: '', request: [0x27, 0x02, 0x11, 0x22, 0x33, 0x44], setup: [[0x10, 0x03]] },
+    { title: '', description: '', request: [0x27, 0x01] },
+  ],
+};
+
+const sid2E: ServiceLearnContent = {
+  sid: '2E',
+  isoRef: 'ISO 14229-1, mục 11.7',
+  purpose:
+    'WriteDataByIdentifier ghi giá trị mới cho một DID: VIN khi thay ECU, cấu hình tính năng (coding), giá trị hiệu chỉnh... Vì làm thay đổi dữ liệu lâu dài trong ECU, service này thường chỉ được phép trong extended session và cần security access.',
+  useCases: [
+    'Ghi VIN vào ECU mới thay thế (DID 0xF190).',
+    'Bật/tắt tính năng bằng coding, ví dụ đèn chạy ban ngày (DID 0x0200 trong simulator).',
+    'Ghi ngày lập trình hoặc mã xưởng sau khi sửa chữa.',
+  ],
+  requestTable: [
+    { byte: '0', field: 'SID', size: '1 byte', value: '0x2E', meaning: 'WriteDataByIdentifier' },
+    { byte: '1–2', field: 'DID', size: '2 byte', value: 'ví dụ 0xF190', meaning: 'DID cần ghi; mỗi request chỉ ghi một DID.' },
+    { byte: '3–…', field: 'Dữ liệu ghi', size: 'đúng độ dài DID', value: '…', meaning: 'Giá trị mới, không thừa không thiếu byte nào.' },
+  ],
+  responseTable: [
+    { byte: '0', field: 'Response SID', size: '1 byte', value: '0x6E', meaning: '0x2E + 0x40' },
+    { byte: '1–2', field: 'DID', size: '2 byte', value: 'ví dụ 0xF190', meaning: 'ECU lặp lại DID vừa ghi (không gửi lại dữ liệu).' },
+  ],
+  nrcs: [
+    { nrc: 0x7f, trigger: 'Gửi trong default session; simulator chỉ cho ghi ở extended/programming session.' },
+    { nrc: 0x13, trigger: 'Request ngắn hơn 4 byte, hoặc dữ liệu không đúng độ dài DID (VIN phải đúng 17 byte).' },
+    { nrc: 0x31, trigger: 'DID không tồn tại, DID chỉ đọc (ví dụ 0xF187), hoặc DID không được ghi trong session hiện tại.' },
+    { nrc: 0x33, trigger: 'DID yêu cầu security level (VIN và 0x0200 cần level 1) nhưng ECU đang khóa.' },
+    { nrc: 0x93, trigger: 'Điện áp ắc quy dưới 11,0 V (kéo slider ở Cấu hình xe › Điều kiện xe, hoặc inject lỗi ắc quy).' },
+    { nrc: 0x92, trigger: 'Điện áp ắc quy trên 15,5 V.' },
+  ],
+  examples: [
+    { title: 'Ghi VIN trong default session', description: 'Service bị chặn ngay ở bước 2 của quy trình: NRC 0x7F.', request: [0x2e, 0xf1, 0x90, ...VIN_NEW] },
+    {
+      title: 'Ghi VIN khi chưa unlock',
+      description: 'Đã vào extended session nhưng chưa mở security level 1 mà VIN yêu cầu: NRC 0x33.',
+      request: [0x2e, 0xf1, 0x90, ...VIN_NEW],
+      setup: [[0x10, 0x03]],
+    },
+    {
+      title: 'Ghi VIN thành công (request nhiều frame)',
+      description:
+        'Request dài 20 byte nên tester gửi First Frame, ECU trả Flow Control, rồi tester gửi Consecutive Frame. ECU ghi xong trả 6E F1 90; đọc lại bằng 22 F1 90 sẽ thấy VIN mới.',
+      request: [0x2e, 0xf1, 0x90, ...VIN_NEW],
+      setup: [[0x10, 0x03]],
+      setupState: { unlockedLevel: 1 },
+    },
+    {
+      title: 'Điện áp ắc quy thấp',
+      description: 'Mọi điều kiện khác đều đạt nhưng điện áp chỉ 10,5 V: ECU từ chối ghi bộ nhớ với NRC 0x93.',
+      request: [0x2e, 0x02, 0x00, 0x00],
+      setup: [[0x10, 0x03]],
+      setupState: { unlockedLevel: 1 },
+      conditions: { batteryVoltage: 10.5 },
+    },
+  ],
+  mistakes: [
+    'Ghi xong mà không đọc lại bằng 0x22 để kiểm tra.',
+    'Sai độ dài dữ liệu: phải đúng độ dài DID (NRC 0x13).',
+    'Quên mở security trước khi ghi (NRC 0x33).',
+    'Ghi khi ắc quy yếu (NRC 0x93): xưởng dịch vụ luôn gắn bộ cấp nguồn ổn định khi lập trình.',
+    'Hiểu NRC 0x31 là lỗi định dạng: DID chỉ đọc hoặc không ghi được trong session hiện tại cũng trả 0x31.',
+  ],
+  autosar: {
+    intro: 'Dcm kiểm tra session/security theo cấu hình DID rồi chuyển dữ liệu cho SWC ghi vào bộ nhớ (thường qua NvM).',
+    items: [
+      { name: 'DcmDspDidWrite', desc: 'Điều kiện ghi của DID: DcmDspDidWriteSessionRef và DcmDspDidWriteSecurityLevelRef.' },
+      { name: 'DcmDspData (WriteData)', desc: 'Dcm gọi hàm/port WriteData của SWC; SWC có thể trả NRC (ví dụ 0x22, 0x93) qua tham số ErrorCode.' },
+      { name: 'NvM', desc: 'SWC lưu giá trị vào NvM block để giữ qua lần khởi động sau; ghi thất bại có thể dẫn tới NRC 0x72.' },
+    ],
+  },
+  form: { writeDid: true },
+  exercises: [
+    { title: '', description: '', request: [0x2e, 0x02, 0x00, 0x00], setup: [[0x10, 0x03]], setupState: { unlockedLevel: 1 } },
+    { title: '', description: '', request: [0x2e, 0x02, 0x00, 0x01] },
+    { title: '', description: '', request: [0x2e, 0x02, 0x00, 0x01], setup: [[0x10, 0x03]] },
+    { title: '', description: '', request: [0x2e, 0xf1, 0x87, 0x41], setup: [[0x10, 0x03]] },
+    { title: '', description: '', request: [0x2e, 0xf1, 0x90, ...VIN_NEW], setup: [[0x10, 0x03]], setupState: { unlockedLevel: 1 } },
+    { title: '', description: '', request: [0x2e, 0x02, 0x00, 0x00], setup: [[0x10, 0x03]], setupState: { unlockedLevel: 1 }, conditions: { batteryVoltage: 10.5 } },
+  ],
+};
+
+const sid11: ServiceLearnContent = {
+  sid: '11',
+  isoRef: 'ISO 14229-1, mục 10.3',
+  purpose:
+    'ECUReset yêu cầu ECU khởi động lại. Thường dùng sau khi nạp phần mềm hoặc ghi cấu hình để ECU áp dụng giá trị mới, hoặc để đưa ECU về trạng thái ban đầu khi chẩn đoán.',
+  useCases: [
+    'Sau khi flash xong: hardReset để chạy phần mềm mới.',
+    'Sau khi coding bằng 0x2E: reset để ECU đọc lại cấu hình.',
+    'Đưa nhanh ECU về default session và trạng thái security bị khóa.',
+  ],
+  requestTable: [
+    { byte: '0', field: 'SID', size: '1 byte', value: '0x11', meaning: 'ECUReset' },
+    { byte: '1', field: 'Sub-function', size: '1 byte', value: '0x01 / 0x02 / 0x03', meaning: 'resetType; bit 7 là suppressPosRspMsgIndicationBit (0x81 = hardReset, không cần response).' },
+  ],
+  responseTable: [
+    { byte: '0', field: 'Response SID', size: '1 byte', value: '0x51', meaning: '0x11 + 0x40' },
+    { byte: '1', field: 'Sub-function', size: '1 byte', value: '0x01 / 0x02 / 0x03', meaning: 'ECU lặp lại resetType. Riêng sub-function 0x04 có thêm byte powerDownTime (simulator không hỗ trợ).' },
+  ],
+  subFunctions: [
+    { value: '0x01', name: 'hardReset', meaning: 'Giả lập ngắt rồi cấp lại nguồn: khởi động lại toàn bộ ECU.' },
+    { value: '0x02', name: 'keyOffOnReset', meaning: 'Giả lập tắt rồi bật lại khóa điện.' },
+    { value: '0x03', name: 'softReset', meaning: 'Chỉ khởi động lại phần mềm.' },
+    { value: '0x04 / 0x05', name: 'enable/disableRapidPowerShutDown', meaning: 'Simulator không hỗ trợ nên trả NRC 0x12.' },
+  ],
+  nrcs: [
+    { nrc: 0x12, trigger: 'Sub-function khác 0x01–0x03, ví dụ 11 04.' },
+    { nrc: 0x13, trigger: 'Request không đúng 2 byte.' },
+    { nrc: 0x88, trigger: 'Xe đang chạy (tốc độ > 0) khi điều kiện "xe phải đứng yên" đang bật.' },
+    { nrc: 0x83, trigger: 'Động cơ đang chạy khi điều kiện "động cơ phải tắt" đang bật.' },
+  ],
+  examples: [
+    { title: 'Hard reset thành công', description: 'ECU gửi 51 01 trước, sau đó khởi động lại khoảng 1,5 s, về default session và khóa security.', request: [0x11, 0x01], setup: [[0x10, 0x03]] },
+    { title: 'Xe đang chạy', description: 'Tốc độ 30 km/h nên ECU từ chối reset vì lý do an toàn: NRC 0x88.', request: [0x11, 0x01], conditions: { speedKmh: 30 } },
+    { title: 'Động cơ đang chạy', description: 'Xe đứng yên nhưng động cơ đang nổ máy: NRC 0x83.', request: [0x11, 0x01], conditions: { engineRunning: true, rpm: 800 } },
+    { title: 'resetType không hỗ trợ', description: 'Simulator không hỗ trợ enableRapidPowerShutDown: NRC 0x12.', request: [0x11, 0x04] },
+  ],
+  mistakes: [
+    'Gửi request ngay sau 0x11: ECU đang khởi động lại nên không trả lời, tester phải chờ.',
+    'Quên rằng sau reset ECU về default session và security bị khóa: phải vào session và unlock lại.',
+    'Reset khi xe đang chạy: hầu hết ECU từ chối (NRC 0x88) vì lý do an toàn.',
+    'Dùng 0x81 (có suppress bit) rồi không chắc ECU đã reset: có thể đọc DID 0xF186 sau khi ECU khởi động xong.',
+  ],
+  autosar: {
+    intro: 'Dcm không tự reset vi điều khiển; nó báo cho BswM qua mode switch và BswM thực hiện reset.',
+    items: [
+      { name: 'DcmDsdService 0x11', desc: 'Khai báo service và các resetType được hỗ trợ.' },
+      { name: 'Mode DcmEcuReset', desc: 'Dcm chuyển mode HARD / KEYONOFF / SOFT theo resetType, rồi EXECUTE sau khi positive response đã gửi xong.' },
+      { name: 'BswM', desc: 'Nhận mode EXECUTE và gọi hàm reset của MCU (ví dụ Mcu_PerformReset).' },
+    ],
+  },
+  form: {
+    subFunctions: [
+      { id: 0x01, label: '01 hardReset' },
+      { id: 0x02, label: '02 keyOffOnReset' },
+      { id: 0x03, label: '03 softReset' },
+    ],
+    allowSuppress: true,
+  },
+  exercises: [
+    { title: '', description: '', request: [0x11, 0x01] },
+    { title: '', description: '', request: [0x11, 0x03] },
+    { title: '', description: '', request: [0x11, 0x01], conditions: { speedKmh: 40 } },
+    { title: '', description: '', request: [0x11, 0x02], conditions: { engineRunning: true, rpm: 900 } },
+    { title: '', description: '', request: [0x11, 0x05] },
+  ],
+};
+
 export const SERVICES_META: Partial<Record<ServiceSidKey, ServiceLearnContent>> = {
   '10': sid10,
+  '11': sid11,
   '22': sid22,
+  '27': sid27,
+  '2E': sid2E,
   '3E': sid3E,
 };

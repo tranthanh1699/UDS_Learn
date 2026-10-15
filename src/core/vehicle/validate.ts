@@ -101,6 +101,7 @@ export function parseVehicleConfig(raw: unknown, defaults: VehicleConfig): { ok:
     timing: section('timing', defaults.timing),
     conditions: section('conditions', defaults.conditions),
     limits: section('limits', defaults.limits),
+    ecuReset: section('ecuReset', defaults.ecuReset),
     security: isObj(raw.security) && Array.isArray(raw.security.levels) ? { levels: raw.security.levels as SecurityLevelConfig[] } : defaults.security,
     dids: Array.isArray(raw.dids) ? (raw.dids as DidDefinition[]) : defaults.dids,
   };

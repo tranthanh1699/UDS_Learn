@@ -14,6 +14,7 @@ import { ResultSummary } from '@/components/uds/ResultSummary';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Switch } from '@/components/ui/Switch';
+import { KeyCalculator } from './KeyCalculator';
 import { RequestBuilder } from './RequestBuilder';
 
 const p = vi.practice;
@@ -43,6 +44,7 @@ export function PracticeTab({ content }: { content: ServiceLearnContent }) {
   const send = useEcuRuntimeStore((s) => s.send);
   // Kết quả của request gửi từ chính tab này (không lẫn với request gửi từ trang service khác)
   const [last, setLast] = useState<Exchange | null>(null);
+  const lastSeed = useEcuRuntimeStore((s) => s.lastSeed);
   const pending = useEcuRuntimeStore((s) => s.simulateResponsePending);
   const setPending = useEcuRuntimeStore((s) => s.setSimulateResponsePending);
   const autoTp = useEcuRuntimeStore((s) => s.autoTesterPresent);
@@ -65,7 +67,7 @@ export function PracticeTab({ content }: { content: ServiceLearnContent }) {
           <Card>
             <CardHeader title={p.builder} icon={<Wrench className="h-4 w-4" />} />
             <CardBody>
-              <RequestBuilder sid={parseInt(content.sid, 16)} form={content.form} config={config} onSend={(pdu, a) => setLast(send(pdu, a))} />
+              <RequestBuilder sid={parseInt(content.sid, 16)} form={content.form} config={config} onSend={(pdu, a) => setLast(send(pdu, a))} lastSeed={lastSeed} />
             </CardBody>
           </Card>
           <Card>
@@ -75,6 +77,7 @@ export function PracticeTab({ content }: { content: ServiceLearnContent }) {
               <Switch checked={autoTp} onCheckedChange={setAutoTp} label={p.autoTp} hint={p.autoTpHint} />
             </CardBody>
           </Card>
+          {content.form.securityLevels && <KeyCalculator config={config} lastSeed={lastSeed} />}
           {last && <ResultSummary result={last.result} />}
         </div>
         <div className="space-y-4">

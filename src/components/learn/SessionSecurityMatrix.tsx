@@ -1,6 +1,6 @@
 import { Check, X } from 'lucide-react';
 import { ALL_SESSIONS } from '@/core/uds/session';
-import type { ServiceDefinition } from '@/core/uds/types';
+import { resolveSubFunctions, type ServiceDefinition } from '@/core/uds/types';
 import { hex } from '@/core/util/hex';
 import type { SessionKind, VehicleConfig } from '@/core/vehicle/types';
 import { vi } from '@/i18n/vi';
@@ -15,9 +15,14 @@ interface Row {
 export function SessionSecurityMatrix({ def, config }: { def: ServiceDefinition; config: VehicleConfig }) {
   const l = vi.learn;
   const rows: Row[] = [{ label: l.matrixService(def.name), sessions: def.sessions, security: def.securityLevel }];
-  for (const s of def.subFunctions ?? []) rows.push({ label: l.matrixSub(hex(s.id), s.name), sessions: s.sessions, security: s.securityLevel });
+  for (const s of resolveSubFunctions(def, config)) rows.push({ label: l.matrixSub(hex(s.id), s.name), sessions: s.sessions, security: s.securityLevel });
   if (def.sid === 0x22) {
     for (const d of config.dids) rows.push({ label: l.matrixDidRead(hex(d.did, 4), d.name), sessions: d.readSessions, security: d.readSecurityLevel });
+  }
+  if (def.sid === 0x2e) {
+    for (const d of config.dids.filter((x) => x.writable)) {
+      rows.push({ label: l.matrixDidWrite(hex(d.did, 4), d.name), sessions: d.writeSessions, security: d.writeSecurityLevel });
+    }
   }
   return (
     <div className="overflow-x-auto rounded-lg border border-border">

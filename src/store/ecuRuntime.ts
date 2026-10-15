@@ -22,6 +22,8 @@ interface EcuRuntimeState {
   simulateResponsePending: boolean;
   /** Exchange gần nhất (dùng cho hiệu ứng gói tin trên hình xe). */
   lastExchange: Exchange | null;
+  /** Seed tester nhận được gần nhất (lấy từ response 67 <lẻ> ...), dùng để tính key. */
+  lastSeed: { level: number; seed: number[] } | null;
   send: (request: number[], addressing: Addressing, opts?: { auto?: boolean }) => Exchange;
   tick: () => void;
   setAutoTesterPresent: (on: boolean) => void;
@@ -30,15 +32,15 @@ interface EcuRuntimeState {
 
 const snapshot = () => {
   const s = server.getState();
-  return { session: s.session, unlockedLevel: s.unlockedLevel, s3ExpiresAt: s.s3Deadline };
+  return { session: s.session, unlockedLevel: s.unlockedLevel, s3ExpiresAt: s.s3Deadline, rebooting: s.rebootUntil !== null };
 };
 
 export const useEcuRuntimeStore = create<EcuRuntimeState>((set, get) => ({
   ...snapshot(),
-  rebooting: false,
   autoTesterPresent: false,
   simulateResponsePending: false,
   lastExchange: null,
+  lastSeed: null,
 
   send: (request, addressing, opts = {}) => {
     const now = Date.now();
@@ -52,7 +54,13 @@ export const useEcuRuntimeStore = create<EcuRuntimeState>((set, get) => ({
     const trace = useTraceStore.getState();
     const exchange = buildExchange(trace.takeId(), now, config, result, opts.auto);
     trace.addExchange(exchange);
-    set({ ...snapshot(), ...(opts.auto ? {} : { lastExchange: exchange }) });
+    const rsp = result.response;
+    const seedReceived = rsp && rsp[0] === 0x67 && rsp.length > 2 && rsp[1]! % 2 === 1;
+    set({
+      ...snapshot(),
+      ...(opts.auto ? {} : { lastExchange: exchange }),
+      ...(seedReceived ? { lastSeed: { level: rsp[1]!, seed: rsp.slice(2) } } : {}),
+    });
     return exchange;
   },
 

@@ -54,6 +54,7 @@ export const DEFAULT_VEHICLE: VehicleConfig = {
       },
     ],
   },
+  ecuReset: { requireStandstill: true, requireEngineOff: true },
   conditions: { speedKmh: 0, rpm: 0, engineRunning: false, batteryVoltage: 12.6, gear: 'P' },
   limits: { maxDidsPerRead: 8, maxResponseLength: 4095 },
   dids: [
